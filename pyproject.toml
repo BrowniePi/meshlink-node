@@ -1,0 +1,18 @@
+[project]
+name = "meshlink-node"
+version = "0.1.0"
+description = "MeshLink Raspberry Pi node — BLE peripheral relay backbone"
+requires-python = ">=3.10"
+dependencies = [
+    # BlueZ D-Bus bindings. On Raspberry Pi OS install the system packages
+    # instead of building from pip (see README): python3-dbus, python3-gi.
+    "dbus-python; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "PyGObject; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "vendor/meshlink-core"]
+testpaths = ["tests"]

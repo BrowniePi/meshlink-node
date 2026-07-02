@@ -1,0 +1,18 @@
+[Unit]
+Description=MeshLink node (BLE peripheral relay)
+After=bluetooth.target network.target
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+# Adjust if the repo is cloned elsewhere.
+WorkingDirectory=/home/pi/meshlink-node
+ExecStart=/usr/bin/python3 -m node.main
+Restart=on-failure
+RestartSec=3
+# BlueZ D-Bus API (RegisterApplication/RegisterAdvertisement) requires root
+# or a polkit rule; root keeps Phase 2 simple.
+User=root
+
+[Install]
+WantedBy=multi-user.target
