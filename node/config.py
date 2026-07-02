@@ -1,5 +1,11 @@
 """Node configuration."""
 
+# The zone this node serves. Hardcoded for Phase 2 — there is one node and
+# one zone, and NodeRelay treats every message as local to this zone (no
+# multi-zone routing logic exists yet). Phase 7 replaces this constant with
+# dynamic zone assignment at deployment.
+NODE_ZONE_ID = 1
+
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"
 RX_CHAR_UUID = "4d455348-4c49-4e4b-0002-000000000002"  # centrals write inbound
