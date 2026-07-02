@@ -1,0 +1,74 @@
+{
+  "generator": "meshlink-core @ Phase1 (python reference)",
+  "vectors": [
+    {
+      "name": "valid_text_deliver",
+      "raw_hex": "3f4a5b6c7d8e9fa0b1c2d3e4f5061728000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f68643e40050800030100124d65657420617420736f757468206761746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fixed_now": 1751400010,
+      "outcome": "deliver",
+      "drop_reason": null,
+      "parsed": {
+        "msg_id_hex": "3f4a5b6c7d8e9fa0b1c2d3e4f5061728",
+        "sender_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "ephem_id_hex": "000102030405060708090a0b0c0d0e0f",
+        "timestamp": 1751400000,
+        "ttl": 5,
+        "spray_l": 8,
+        "zone_id": 3,
+        "msg_type": 1,
+        "payload_len": 18,
+        "payload_hex": "4d65657420617420736f7574682067617465",
+        "signature_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "duplicate_msg_id",
+      "raw_hex": "3f4a5b6c7d8e9fa0b1c2d3e4f5061728000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f68643e40050800030100124d65657420617420736f757468206761746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "duplicate: msg_id already seen"
+    },
+    {
+      "name": "ttl_exhausted",
+      "raw_hex": "11111111111111111111111111111111000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f68643e40000800030100124d65657420617420736f757468206761746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "ttl exhausted"
+    },
+    {
+      "name": "too_small",
+      "raw_hex": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "packet too small: 100 bytes (min 131)"
+    },
+    {
+      "name": "too_large",
+      "raw_hex": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "packet too large: 500 bytes (max 460)"
+    },
+    {
+      "name": "length_mismatch",
+      "raw_hex": "22222222222222222222222222222222000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f68643e40050800030100124d65657420617420736f7574682067617465000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "malformed: packet length 150 != expected 157 (payload_len=18)"
+    },
+    {
+      "name": "timestamp_too_old",
+      "raw_hex": "33333333333333333333333333333333000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f68643cba050800030100124d65657420617420736f757468206761746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "timestamp too old: 400s ago (max 300s)"
+    },
+    {
+      "name": "timestamp_future",
+      "raw_hex": "44444444444444444444444444444444000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000102030405060708090a0b0c0d0e0f68643e86050800030100124d65657420617420736f757468206761746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fixed_now": 1751400010,
+      "outcome": "drop",
+      "drop_reason": "timestamp too far in future: 60s ahead (max 30s)"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+[submodule "vendor/meshlink-core"]
+	path = vendor/meshlink-core
+	url = https://github.com/BrowniePi/meshlink-core.git
