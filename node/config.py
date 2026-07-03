@@ -11,7 +11,7 @@ MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"
 RX_CHAR_UUID = "4d455348-4c49-4e4b-0002-000000000002"  # centrals write inbound
 TX_CHAR_UUID = "4d455348-4c49-4e4b-0003-000000000003"  # node notifies outbound
 
-BLE_LOCAL_NAME = "MeshLink-Node"
+BLE_LOCAL_NAME = "MeshLink"
 
 # Notification chunk size. The app requests ATT MTU 247 (usable 244) and iOS
 # negotiates at least 185 (usable 182); 180 stays under both. Lower this to
