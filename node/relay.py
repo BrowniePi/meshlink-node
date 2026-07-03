@@ -35,6 +35,9 @@ class NodeRelay:
         self._zone_id = zone_id
         self._pipeline = RelayPipeline()
         transport.on_receive(self._handle_packet)
+        # Packets arriving from other nodes run the same pipeline as BLE
+        # traffic (dedup is what stops cross-node loops). No-op on the stub.
+        backhaul.on_receive(self._handle_packet)
 
     def start(self) -> None:
         self._transport.start()

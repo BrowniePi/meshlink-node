@@ -1,7 +1,8 @@
 """MeshLink node entrypoint.
 
-Phase 2: single node acting as a BLE GATT peripheral, relaying messages
-between connected phones via the shared meshlink-core pipeline.
+Phase 3: BLE GATT peripheral relaying messages between connected phones
+via the shared meshlink-core pipeline, plus the batman-adv backhaul
+relaying cross-zone traffic between nodes.
 """
 import logging
 
@@ -17,19 +18,24 @@ def main() -> None:
     # Heavy imports happen here so `python3 -m node.main --help`-style tooling
     # and unit tests never need BlueZ/D-Bus present.
     from node import config
-    from node.backhaul.base import LoggingStubBackhaul
+    from node.backhaul.batman_backhaul import BatmanBackhaul
+    from node.backhaul.radio_config import check_backhaul_radio
     from node.ble.gatt_server import GattServer
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
 
+    check_backhaul_radio()  # diagnosis only — BLE service runs either way
+
     server = GattServer()
     transport = BleTransport(server)
+    backhaul = BatmanBackhaul(zone_id=config.NODE_ZONE_ID)
     relay = NodeRelay(
         transport=transport,
-        backhaul=LoggingStubBackhaul(),
+        backhaul=backhaul,
         zone_id=config.NODE_ZONE_ID,
     )
 
+    backhaul.start()
     relay.start()
     log.info("node up — zone_id=%d, advertising MeshLink service", config.NODE_ZONE_ID)
     try:
@@ -38,6 +44,7 @@ def main() -> None:
         log.info("shutting down")
     finally:
         relay.stop()
+        backhaul.stop()
 
 
 if __name__ == "__main__":

@@ -1,14 +1,16 @@
 # meshlink-node
 
-MeshLink Raspberry Pi node software (Phase 2 — "The Node Enters").
+MeshLink Raspberry Pi node software (Phase 3 — "Multi-Node Backhaul").
 
 The node runs on a Raspberry Pi 4 as a **BLE GATT peripheral** that phones connect
 outbound to. It imports the shared `meshlink-core` relay pipeline (second consumer
-after `meshlink-app`) and relays messages between BLE-connected phones — two phones
-that cannot reach each other directly can exchange messages through the node.
+after `meshlink-app`) and relays messages between BLE-connected phones — and, since
+Phase 3, between nodes: cross-zone messages travel over a batman-adv WiFi mesh
+(802.11s on a second radio) to the node serving the destination zone.
 
-Phase 2 scope: **one node, no mesh**. Node-to-node backhaul (batman-adv, Phase 3)
-exists only as a stub interface in `node/backhaul/`.
+Phase 3 scope: **3 nodes, hand-wired zones**. Each node is assigned one zone
+(`MESHLINK_ZONE_ID`) and a static table maps zones to node IPs — the dynamic
+zone-routing table arrives in Phase 7.
 
 ## Repository layout
 
@@ -16,15 +18,16 @@ exists only as a stub interface in `node/backhaul/`.
 node/            main package
   ble/           BlueZ D-Bus GATT server (peripheral role)
   transport/     node-side Transport adapter (same interface as the app's)
-  backhaul/      node-to-node interface stub (implemented in Phase 3)
+  backhaul/      node-to-node backhaul (batman-adv UDP + static zone table)
   core/          import shim for the vendored meshlink-core package
-  relay.py       wires transport → meshlink-core pipeline → peers
-  config.py      node configuration (hardcoded zone_id for Phase 2)
+  relay.py       wires transport → meshlink-core pipeline → peers/backhaul
+  config.py      node configuration (per-node zone_id, backhaul port)
   main.py        entrypoint
-scripts/         Pi setup helper + systemd unit
+scripts/         Pi setup helpers (BLE, backhaul radio, batman-adv) + systemd unit
 vendor/          meshlink-core git submodule (pinned)
 tests/           unit tests (runnable on a dev machine, no BlueZ needed)
 docs/demos/      milestone demo evidence
+docs/tests/      physical test runbooks and results
 ```
 
 ## Requirements
@@ -62,6 +65,21 @@ journalctl -u meshlink-node -f   # follow logs
 ```
 
 Or use the helper: `sudo scripts/setup-pi.sh` (installs packages + service).
+
+### Backhaul (Phase 3, 3-node mesh)
+
+Each node needs a second WiFi radio (USB adapter with 802.11s support); the
+onboard radio stays on phone-facing duties. Per node:
+
+```bash
+sudo scripts/setup_backhaul_radio.sh              # 802.11s mesh mode, 5 GHz ch 149
+sudo MESHLINK_NODE_ID=1 scripts/setup_batman.sh   # bat0 up as 10.77.0.1 (node 1)
+MESHLINK_ZONE_ID=1 python3 -m node.main           # node 1 serves zone 1
+```
+
+Use node/zone 2 and 3 on the other Pis (zone N ↔ `10.77.0.N`, per
+`node/backhaul/static_zone_table.py`). Verify the mesh with `batctl o` and
+`ping 10.77.0.<other-id>`. Both scripts are idempotent — safe to re-run on boot.
 
 ## meshlink-core dependency
 

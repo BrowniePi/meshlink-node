@@ -1,20 +1,19 @@
-"""Node-to-node backhaul interface — deliberately unimplemented at Phase 2.
+"""Node-to-node backhaul interface.
 
-There is exactly one node right now, so there is nothing to mesh. This
-interface exists so the node's routing logic already speaks in terms of
-"hand this to another node" — Phase 3's batman-adv backhaul module will be
-new code implementing this interface, not a rewrite of how the node routes.
-
-Do not add networking code here in Phase 2.
+Stubbed in Phase 2 (one node, nothing to mesh); implemented for real by
+Phase 3's batman_backhaul.py. The node's routing logic speaks only in terms
+of this interface — swapping the stub for the batman-adv implementation is
+new code, not a rewrite of how the node routes.
 """
 import logging
 from abc import ABC, abstractmethod
+from typing import Callable
 
 log = logging.getLogger("meshlink.backhaul")
 
 
 class NodeBackhaul(ABC):
-    """How this node talks to other nodes. Implemented in Phase 3 (batman-adv)."""
+    """How this node talks to other nodes (batman-adv since Phase 3)."""
 
     @abstractmethod
     def forward_to_zone(self, zone_id: int, packet: bytes) -> None:
@@ -24,9 +23,17 @@ class NodeBackhaul(ABC):
     def broadcast_to_all_nodes(self, packet: bytes) -> None:
         """Flood a packet (e.g. a venue-wide announcement) to every node."""
 
+    def on_receive(self, callback: Callable[[str, bytes], None]) -> None:
+        """Register callback(peer_id, raw) for packets arriving from other
+        nodes. Default is a no-op: the Phase 2 stub had no receive direction,
+        and a backhaul-less node simply never gets called back."""
+
 
 class LoggingStubBackhaul(NodeBackhaul):
-    """No-op stand-in until Phase 3: logs what a real backhaul would do."""
+    """No-op stand-in from Phase 2: logs what a real backhaul would do.
+
+    Still used by tests and by nodes running without a backhaul radio.
+    """
 
     def forward_to_zone(self, zone_id: int, packet: bytes) -> None:
         log.info(
