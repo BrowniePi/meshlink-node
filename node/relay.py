@@ -17,6 +17,18 @@ BROADCAST_ZONE = 0xFFFF
 _TTL_OFFSET = 68
 
 
+def _describe_payload(payload: bytes) -> str:
+    """Best-effort human-readable payload for logging.
+
+    Payloads are plaintext until Phase 4 adds encryption, so UTF-8 text is
+    the common case; anything else falls back to a hex preview.
+    """
+    try:
+        return repr(payload.decode("utf-8"))
+    except UnicodeDecodeError:
+        return f"<{len(payload)} bytes: {payload[:32].hex()}{'…' if len(payload) > 32 else ''}>"
+
+
 def decrement_ttl(raw: bytes) -> bytes:
     """Return the packet with ttl reduced by one hop.
 
@@ -46,12 +58,17 @@ class NodeRelay:
         self._transport.stop()
 
     def _handle_packet(self, peer_id: str, raw: bytes) -> None:
+        log.info("received %d-byte packet from %s", len(raw), peer_id)
         result = self._pipeline.process(raw)
         if result.outcome == Outcome.DROP:
             log.info("drop from %s: %s", peer_id, result.drop_reason)
             return
 
         msg = result.message
+        log.info(
+            "accepted msg %s from %s: %s",
+            msg.msg_id.hex()[:8], peer_id, _describe_payload(msg.payload),
+        )
 
         # Cross-node cases go through the backhaul interface. With one node
         # it's a logging stub — but routing already speaks in these terms so

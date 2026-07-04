@@ -5,15 +5,32 @@ via the shared meshlink-core pipeline, plus the batman-adv backhaul
 relaying cross-zone traffic between nodes.
 """
 import logging
+import sys
+from pathlib import Path
+
+LOG_FILE = Path(__file__).resolve().parent.parent / "node.log"
+
+
+def _configure_logging() -> None:
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    # A dropped or scrolled-past terminal line is the single biggest source
+    # of "did it even receive that" confusion during manual phone testing —
+    # everything also lands in a file so `tail -f node.log` is always
+    # available as ground truth regardless of what the terminal shows.
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setFormatter(formatter)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+
+    logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _configure_logging()
     log = logging.getLogger("meshlink.node")
-    log.info("meshlink-node starting")
+    log.info("meshlink-node starting — logging to %s", LOG_FILE)
 
     # Heavy imports happen here so `python3 -m node.main --help`-style tooling
     # and unit tests never need the platform Bluetooth stack present.
