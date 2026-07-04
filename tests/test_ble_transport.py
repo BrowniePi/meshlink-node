@@ -14,7 +14,7 @@ from tests.helpers import build_packet
 
 
 class FakeGattServer:
-    """Same surface as node.ble.gatt_server.GattServer, no D-Bus."""
+    """Same surface as node.ble.base.GattServerBase, no Bluetooth stack."""
 
     def __init__(self):
         self.on_packet = None

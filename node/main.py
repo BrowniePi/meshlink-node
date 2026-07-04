@@ -16,17 +16,17 @@ def main() -> None:
     log.info("meshlink-node starting")
 
     # Heavy imports happen here so `python3 -m node.main --help`-style tooling
-    # and unit tests never need BlueZ/D-Bus present.
+    # and unit tests never need the platform Bluetooth stack present.
     from node import config
     from node.backhaul.batman_backhaul import BatmanBackhaul
     from node.backhaul.radio_config import check_backhaul_radio
-    from node.ble.gatt_server import GattServer
+    from node.ble import create_gatt_server
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
 
     check_backhaul_radio()  # diagnosis only — BLE service runs either way
 
-    server = GattServer()
+    server = create_gatt_server()
     transport = BleTransport(server)
     backhaul = BatmanBackhaul(zone_id=config.NODE_ZONE_ID)
     relay = NodeRelay(
