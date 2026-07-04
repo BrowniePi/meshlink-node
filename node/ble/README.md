@@ -1,11 +1,35 @@
-# node/ble — BlueZ GATT server
+# node/ble — GATT server (peripheral role)
 
 The node acts as a BLE **peripheral**: it advertises the MeshLink service as a
 full, standard advertisement (discoverable by both iOS and Android — never the
 iOS overflow area, which only applies to backgrounded iOS *peripherals*; the
-node is always-on Linux hardware, which is the point of the architecture).
+node is always-on hardware, which is the point of the architecture).
 
-## Environment tested
+## Module layout
+
+| Module | Role |
+|--------|------|
+| `base.py` | `GattServerBase` — all platform-independent behaviour: per-peer frame reassembly, connection bookkeeping, outbound framing/chunking. **Common changes go here** and apply to every backend. |
+| `bluez.py` | Linux/Pi backend (`BluezGattServer`) — BlueZ D-Bus plumbing only |
+| `corebluetooth.py` | macOS backend (`CoreBluetoothGattServer`) — CBPeripheralManager plumbing only, via PyObjC |
+| `framing.py` | 2-byte length-prefix framing shared with the app |
+| `__init__.py` | `create_gatt_server()` — picks the backend by platform; override with `MESHLINK_BLE_BACKEND=bluez\|corebluetooth` |
+
+## macOS backend (CoreBluetooth)
+
+- Requires `pyobjc-framework-CoreBluetooth`; first run triggers the system
+  Bluetooth permission prompt for the hosting app (Terminal/iTerm/VS Code).
+- CoreBluetooth's peripheral API exposes no connect/disconnect events; peer
+  tracking keys off TX subscribe/unsubscribe (the app subscribes right after
+  connecting, so this matches in practice). `peer_id` is the CBCentral
+  identifier UUID — macOS hides MAC addresses.
+- `updateValue` can report a full notification queue; chunks are buffered in
+  order and flushed on `peripheralManagerIsReadyToUpdateSubscribers`.
+- Chose direct PyObjC over the cross-platform `bless` library because
+  `bless`'s write callback does not identify the writing central, which the
+  per-peer reassembly and relay design require.
+
+## Linux backend (BlueZ) — environment tested
 
 | Item | Value |
 |------|-------|

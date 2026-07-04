@@ -8,6 +8,8 @@ dependencies = [
     # instead of building from pip (see README): python3-dbus, python3-gi.
     "dbus-python; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "PyGObject; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    # CoreBluetooth bindings for the macOS development backend.
+    "pyobjc-framework-CoreBluetooth; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

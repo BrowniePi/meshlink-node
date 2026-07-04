@@ -1,4 +1,4 @@
-"""BlueZ D-Bus GATT server — the node acting as a BLE peripheral.
+"""BlueZ D-Bus GATT server backend — Linux (Raspberry Pi).
 
 Advertises the MeshLink service UUID as a full, standard advertisement that
 both iOS and Android can discover (this is the node side of the architecture
@@ -6,11 +6,14 @@ decision that phones always connect outbound to a node). Phones write framed
 packets to the RX characteristic; the node pushes framed packets to phones
 via notifications on the TX characteristic.
 
+All platform-independent behaviour (reassembly, peer tracking, outbound
+framing) lives in node/ble/base.py; this module is only the D-Bus plumbing.
+
 Requires BlueZ (tested against 5.66, Raspberry Pi OS Bookworm default) with
 dbus-python + PyGObject. See node/ble/README.md for D-Bus names and paths.
 """
 import logging
-from typing import Callable, Optional
+from typing import Callable
 
 import dbus
 import dbus.mainloop.glib
@@ -18,7 +21,7 @@ import dbus.service
 from gi.repository import GLib
 
 from node import config
-from node.ble.framing import FrameAssembler, chunk, frame
+from node.ble.base import GattServerBase
 
 log = logging.getLogger("meshlink.ble")
 
@@ -193,25 +196,17 @@ class Application(dbus.service.Object):
         }
 
 
-class GattServer:
-    """Facade the transport layer uses; owns the D-Bus plumbing.
-
-    Callbacks:
-      on_packet(peer_id, packet)   — complete reassembled inbound packet
-      on_disconnect(peer_id)       — a tracked central disconnected
-    """
+class BluezGattServer(GattServerBase):
+    """BlueZ backend; owns the D-Bus plumbing."""
 
     def __init__(self) -> None:
+        super().__init__()
         dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
         self._bus = dbus.SystemBus()
         self._loop = GLib.MainLoop()
         self._service = MeshService(self._bus, self._handle_chunk)
         self._app = Application(self._bus, self._service)
         self._advertisement = Advertisement(self._bus)
-        self._assemblers: dict[str, FrameAssembler] = {}
-        self._connected: set[str] = set()
-        self.on_packet: Optional[Callable[[str, bytes], None]] = None
-        self.on_disconnect: Optional[Callable[[str], None]] = None
 
         self._bus.add_signal_receiver(
             self._device_properties_changed,
@@ -267,44 +262,22 @@ class GattServer:
                 return path
         raise RuntimeError("no BLE adapter with GATT + advertising support found")
 
-    # -- inbound -------------------------------------------------------------
-
-    def _handle_chunk(self, peer_id: str, data: bytes) -> None:
-        self._connected.add(peer_id)
-        assembler = self._assemblers.setdefault(peer_id, FrameAssembler())
-        try:
-            packets = assembler.feed(data)
-        except ValueError as exc:
-            log.warning("dropping corrupt stream from %s: %s", peer_id, exc)
-            return
-        for packet in packets:
-            if self.on_packet is not None:
-                self.on_packet(peer_id, packet)
+    # -- events --------------------------------------------------------------
 
     def _device_properties_changed(self, interface, changed, invalidated, path=None):
         if "Connected" not in changed or path is None:
             return
         peer_id = str(path)
         if changed["Connected"]:
-            self._connected.add(peer_id)
-            log.info("central connected: %s", peer_id)
+            self._peer_connected(peer_id)
         else:
-            self._connected.discard(peer_id)
-            self._assemblers.pop(peer_id, None)
-            if self.on_disconnect is not None:
-                self.on_disconnect(peer_id)
-            log.info("central disconnected: %s", peer_id)
+            self._peer_disconnected(peer_id)
 
     # -- outbound ------------------------------------------------------------
 
-    def send_packet(self, peer_id: str, packet: bytes) -> None:
-        """Notify a framed packet out the TX characteristic.
+    def _notify_chunk(self, data: bytes) -> None:
+        self._service.tx.notify_chunk(data)
 
-        peer_id is accepted for interface symmetry but the notification fans
-        out to every subscribed central (see TxCharacteristic docstring).
-        """
-        for piece in chunk(frame(packet), config.BLE_NOTIFY_CHUNK):
-            self._service.tx.notify_chunk(piece)
 
-    def peers(self) -> list[str]:
-        return sorted(self._connected)
+# Backwards-compatible alias — Phase 2 code and docs used this name.
+GattServer = BluezGattServer

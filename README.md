@@ -14,7 +14,8 @@ exists only as a stub interface in `node/backhaul/`.
 
 ```
 node/            main package
-  ble/           BlueZ D-Bus GATT server (peripheral role)
+  ble/           GATT server (peripheral role): shared base + per-platform
+                 backends (BlueZ on Linux/Pi, CoreBluetooth on macOS)
   transport/     node-side Transport adapter (same interface as the app's)
   backhaul/      node-to-node interface stub (implemented in Phase 3)
   core/          import shim for the vendored meshlink-core package
@@ -63,6 +64,30 @@ journalctl -u meshlink-node -f   # follow logs
 
 Or use the helper: `sudo scripts/setup-pi.sh` (installs packages + service).
 
+## Running on macOS (development)
+
+The node also runs on a Mac for development, using a CoreBluetooth backend
+behind the same GATT server abstraction (`node/ble/base.py`). Platform-neutral
+logic — framing, peer tracking, transport, relay — is identical on both
+platforms; only the radio plumbing differs (`node/ble/bluez.py` vs
+`node/ble/corebluetooth.py`), selected automatically by platform
+(override with `MESHLINK_BLE_BACKEND=bluez|corebluetooth`).
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install pyobjc-framework-CoreBluetooth
+PYTHONPATH=.:vendor/meshlink-core python3 -m node.main
+```
+
+macOS-specific behaviour:
+
+- The first run triggers the system **Bluetooth permission prompt** for the
+  hosting app (Terminal, iTerm, VS Code). Until granted, the node starts but
+  never reaches powered-on/advertising.
+- CoreBluetooth has no peripheral-side connect/disconnect events; peer
+  presence is tracked via TX-characteristic subscribe/unsubscribe, and
+  `peer_id` is the CBCentral identifier UUID rather than a device path.
+
 ## meshlink-core dependency
 
 `meshlink-core` is consumed as a **pinned git submodule** at `vendor/meshlink-core`,
@@ -105,4 +130,4 @@ Must stay in lockstep with `meshlink-app` (`lib/transport/ble_transport.dart`):
 | `4d455348-4c49-4e4b-0003-000000000003` | TX — node notifies outbound packets |
 
 Packets are framed with a 2-byte big-endian length prefix and chunked to the
-negotiated ATT MTU. See `node/ble/README.md` for BlueZ specifics.
+negotiated ATT MTU. See `node/ble/README.md` for backend specifics.

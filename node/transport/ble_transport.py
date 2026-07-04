@@ -1,6 +1,6 @@
 """Node-side BLE transport — the same Transport contract the app satisfies.
 
-Wraps the BlueZ GattServer so the relay pipeline sends/receives through the
+Wraps a GATT server backend so the relay pipeline sends/receives through the
 exact abstraction meshlink-core defined in Phase 0 (transport/base.py). The
 relay logic needs zero changes to run over BLE instead of the Phase 0 socket
 transport — that symmetry, on both ends of the network, is the point.
@@ -15,8 +15,8 @@ log = logging.getLogger("meshlink.transport")
 
 class BleTransport(Transport):
     def __init__(self, server) -> None:
-        """server: node.ble.gatt_server.GattServer (or a test double with the
-        same start/stop/send_packet/peers/on_packet/on_disconnect surface)."""
+        """server: a node.ble.base.GattServerBase backend (or a test double with
+        the same start/stop/send_packet/peers/on_packet/on_disconnect surface)."""
         self._server = server
         self._callback: Optional[Callable[[str, bytes], None]] = None
         server.on_packet = self._handle_packet
