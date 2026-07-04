@@ -9,8 +9,45 @@ import os
 NODE_ZONE_ID = int(os.environ.get("MESHLINK_ZONE_ID", "1"))
 
 # Backhaul (batman-adv) networking — see node/backhaul/batman_backhaul.py.
-BACKHAUL_UDP_PORT = 19788  # 0x4D4C — "ML"
+BACKHAUL_UDP_PORT = int(os.environ.get("MESHLINK_BACKHAUL_PORT", "19788"))  # 0x4D4C — "ML"
 BACKHAUL_BROADCAST_ADDR = "10.77.0.255"  # mesh subnet broadcast (10.77.0.0/24)
+
+
+def parse_addr(text):
+    """Parse "host" or "host:port" into a batman_backhaul Addr.
+
+    A bare host keeps the caller's default port; "host:port" pins both — the
+    latter lets several dev nodes share one machine on loopback. IPv4 only
+    (the backhaul socket is AF_INET), so a lone ":" always means host:port.
+    """
+    text = text.strip()
+    host, sep, port = text.rpartition(":")
+    return (host, int(port)) if sep else text
+
+
+def parse_zone_table(text):
+    """Parse "1=host,2=host:port,…" into a {zone_id: Addr} table."""
+    table = {}
+    for entry in text.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        zone, _, addr = entry.partition("=")
+        table[int(zone)] = parse_addr(addr)
+    return table
+
+
+# Backhaul address overrides for development on machines without batman-adv
+# (e.g. Mac dev nodes on a plain LAN or on loopback). Same override pattern as
+# MESHLINK_BLE_BACKEND. Unset → the batman-adv 10.77.0.x scheme above.
+#   MESHLINK_ZONE_TABLE="1=192.168.1.10,2=192.168.1.11:19789"
+#   MESHLINK_BACKHAUL_BROADCAST_ADDR="192.168.1.255"
+_zone_table_env = os.environ.get("MESHLINK_ZONE_TABLE")
+BACKHAUL_ZONE_TABLE = parse_zone_table(_zone_table_env) if _zone_table_env else None
+
+_broadcast_env = os.environ.get("MESHLINK_BACKHAUL_BROADCAST_ADDR")
+if _broadcast_env:
+    BACKHAUL_BROADCAST_ADDR = parse_addr(_broadcast_env)
 
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"

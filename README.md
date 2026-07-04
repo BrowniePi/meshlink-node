@@ -106,6 +106,46 @@ macOS-specific behaviour:
   presence is tracked via TX-characteristic subscribe/unsubscribe, and
   `peer_id` is the CBCentral identifier UUID rather than a device path.
 
+#### Backhaul between Mac dev nodes
+
+The batman-adv radio (`iw`, 802.11s, `bat0`) is Linux-only, so a Mac node
+can't join the mesh — but the backhaul itself is plain UDP. Point it at real
+LAN IPs or loopback ports instead of the `10.77.0.x` mesh scheme with two env
+vars (same override pattern as `MESHLINK_BLE_BACKEND`); the radio check is
+skipped automatically when a zone table is supplied:
+
+```bash
+# Two nodes on one Mac, over loopback (distinct ports):
+MESHLINK_ZONE_ID=1 MESHLINK_BACKHAUL_PORT=19788 \
+  MESHLINK_ZONE_TABLE="1=127.0.0.1:19788,2=127.0.0.1:19789" \
+  python3 -m node.main
+MESHLINK_ZONE_ID=2 MESHLINK_BACKHAUL_PORT=19789 \
+  MESHLINK_ZONE_TABLE="1=127.0.0.1:19788,2=127.0.0.1:19789" \
+  python3 -m node.main
+
+# Nodes on separate Macs on a LAN (default port, real broadcast):
+MESHLINK_ZONE_ID=1 \
+  MESHLINK_ZONE_TABLE="1=192.168.1.10,2=192.168.1.11" \
+  MESHLINK_BACKHAUL_BROADCAST_ADDR="192.168.1.255" \
+  python3 -m node.main
+```
+
+`MESHLINK_ZONE_TABLE` entries are `zone=host` (default port) or
+`zone=host:port`. Everything above the socket — framing, dedup, the relay
+pipeline — is the same code the Pi mesh runs.
+
+For a two-Mac LAN test, `scripts/run-mac-node.sh` wires these env vars for you
+(auto-detects the local IP, derives the `/24` broadcast, warns on a zone/IP
+mismatch). Run the same zone list on each Mac with its own zone id:
+
+```bash
+# Mac A (zone 1) and Mac B (zone 2), <IP_A>/<IP_B> = each Mac's LAN IP:
+./scripts/run-mac-node.sh 1 <IP_A> <IP_B>   # on Mac A
+./scripts/run-mac-node.sh 2 <IP_A> <IP_B>   # on Mac B
+```
+
+Full runbook (phones, firewall, expected logs): `docs/tests/mac-2node-relay-test.md`.
+
 ## meshlink-core dependency
 
 `meshlink-core` is consumed as a **pinned git submodule** at `vendor/meshlink-core`,

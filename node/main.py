@@ -24,11 +24,22 @@ def main() -> None:
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
 
-    check_backhaul_radio()  # diagnosis only — BLE service runs either way
+    if config.BACKHAUL_ZONE_TABLE is None:
+        check_backhaul_radio()  # diagnosis only — BLE service runs either way
+    else:
+        # Dev override (e.g. a Mac node on a plain LAN/loopback): no batman-adv
+        # radio to check, the zone table is explicit rather than 10.77.0.x.
+        log.info("backhaul using MESHLINK_ZONE_TABLE override — skipping "
+                 "batman-adv radio check")
 
     server = create_gatt_server()
     transport = BleTransport(server)
-    backhaul = BatmanBackhaul(zone_id=config.NODE_ZONE_ID)
+    backhaul = BatmanBackhaul(
+        zone_id=config.NODE_ZONE_ID,
+        zone_table=config.BACKHAUL_ZONE_TABLE,  # None → the static 10.77.0.x table
+        broadcast_addr=config.BACKHAUL_BROADCAST_ADDR,
+        bind=("0.0.0.0", config.BACKHAUL_UDP_PORT),
+    )
     relay = NodeRelay(
         transport=transport,
         backhaul=backhaul,

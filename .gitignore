@@ -19,3 +19,6 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+
+# Runtime log (file-backed logging)
+node.log
