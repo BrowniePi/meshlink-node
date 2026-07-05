@@ -37,6 +37,7 @@ def main() -> None:
     from node import config
     from node.backhaul.batman_backhaul import BatmanBackhaul
     from node.backhaul.radio_config import check_backhaul_radio
+    from node.backhaul.base import LoggingStubBackhaul
     from node.ble import create_gatt_server
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
