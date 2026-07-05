@@ -21,3 +21,4 @@ venv/
 .DS_Store
 
 node.log
+/organiser_pubkey.hex

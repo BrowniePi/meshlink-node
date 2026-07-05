@@ -30,6 +30,10 @@ from pipeline.message import (  # noqa: E402
     Message,
     parse_packet,
 )
+from pipeline.attestation_check import (  # noqa: E402
+    MSG_TYPE_ATTESTATION,
+    set_attestation_validator,
+)
 from pipeline.pipeline import Outcome, PipelineResult, RelayPipeline  # noqa: E402
 from routing.spray_and_wait import split_copies  # noqa: E402
 from transport.base import Transport  # noqa: E402
@@ -38,6 +42,7 @@ __all__ = [
     "HEADER_SIZE",
     "MAX_PACKET",
     "MIN_PACKET",
+    "MSG_TYPE_ATTESTATION",
     "SIGNATURE_SIZE",
     "Message",
     "Outcome",
@@ -45,5 +50,6 @@ __all__ = [
     "RelayPipeline",
     "Transport",
     "parse_packet",
+    "set_attestation_validator",
     "split_copies",
 ]

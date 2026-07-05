@@ -1,5 +1,6 @@
 """Node configuration."""
 import os
+from pathlib import Path
 
 # The zone this node serves. Phase 3: each of the 3 test nodes is deployed
 # with a distinct zone via MESHLINK_ZONE_ID (1, 2, or 3 — matching its
@@ -48,6 +49,25 @@ BACKHAUL_ZONE_TABLE = parse_zone_table(_zone_table_env) if _zone_table_env else 
 _broadcast_env = os.environ.get("MESHLINK_BACKHAUL_BROADCAST_ADDR")
 if _broadcast_env:
     BACKHAUL_BROADCAST_ADDR = parse_addr(_broadcast_env)
+
+# Phase 5 — meshlink-backend integration. The backend is only ever touched
+# off the message path: one organiser-key fetch at boot plus the 60 s
+# heartbeat. Mesh messages never leave the venue network.
+BACKEND_BASE_URL = os.environ.get("MESHLINK_BACKEND_URL", "http://127.0.0.1:8000")
+
+# Event this node is deployed for; attestation tokens for any other eid are
+# rejected at pipeline step 7. Must match the event_id the app purchases
+# tickets for (backend caps it at 25 chars to keep tokens small).
+EVENT_ID = os.environ.get("MESHLINK_EVENT_ID", "test-event-001")
+
+# Organiser Ed25519 public key (64 hex chars). Normally fetched from the
+# backend at startup and cached to disk; the env var skips the fetch entirely
+# (tests, air-gapped bench setups).
+ORGANISER_PUBKEY = os.environ.get("MESHLINK_ORGANISER_PUBKEY")
+ORGANISER_KEY_CACHE = Path(
+    os.environ.get("MESHLINK_ORGANISER_KEY_CACHE",
+                   Path(__file__).resolve().parent.parent / "organiser_pubkey.hex")
+)
 
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"

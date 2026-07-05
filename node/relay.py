@@ -79,6 +79,18 @@ class NodeRelay:
         elif msg.zone_id != self._zone_id:
             self._backhaul.forward_to_zone(msg.zone_id, raw)
 
+        # A verified attestation presentation (Outcome.RELAY) is swallowed
+        # here: the sender is now in this node's validated cache, and the
+        # backhaul forward above lets other nodes learn it too — but phones
+        # never see it (a JWT blob means nothing to the app layer).
+        if result.outcome == Outcome.RELAY:
+            log.info(
+                "attestation presentation from %s accepted — sender %s cached, "
+                "not delivered to phones",
+                peer_id, msg.sender_key.hex()[:16],
+            )
+            return
+
         # Phase 2: single node, single zone — every accepted message is also
         # relayed to the local BLE cell regardless of its zone_id.
         relayed = decrement_ttl(raw)

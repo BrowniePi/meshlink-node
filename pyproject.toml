@@ -17,6 +17,11 @@ dependencies = [
     "pynacl>=1.6.2",      # Ed25519 signing/verification (libsodium)
     "pybloom-live>=4.0.0",  # dedup Bloom filter
     "blake3>=1.0.9",      # ephemeral-id derivation
+    # Phase 5 attestation token verification (pipeline step 7). Same pair the
+    # backend uses to issue tokens — versions kept aligned with
+    # meshlink-backend/pyproject.toml.
+    "pyjwt>=2.9",         # EdDSA compact JWT decode
+    "cryptography>=43",   # Ed25519 public key for PyJWT
 ]
 
 [project.optional-dependencies]

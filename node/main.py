@@ -35,12 +35,30 @@ def main() -> None:
     # Heavy imports happen here so `python3 -m node.main --help`-style tooling
     # and unit tests never need the platform Bluetooth stack present.
     from node import config
+    from node.attestation.organiser_key import load_organiser_pubkey
+    from node.attestation.token_cache import AttestationValidator
     from node.backhaul.batman_backhaul import BatmanBackhaul
     from node.backhaul.radio_config import check_backhaul_radio
     from node.backhaul.base import LoggingStubBackhaul
     from node.ble import create_gatt_server
+    from node.core import set_attestation_validator
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
+
+    # Phase 5: attestation enforcement. One backend call per boot (or none,
+    # with the env override); every token verification afterwards is offline.
+    if config.ORGANISER_PUBKEY:
+        organiser_pubkey = config.ORGANISER_PUBKEY
+        log.info("organiser public key from MESHLINK_ORGANISER_PUBKEY: %s",
+                 organiser_pubkey)
+    else:
+        organiser_pubkey = load_organiser_pubkey(
+            config.BACKEND_BASE_URL, config.ORGANISER_KEY_CACHE
+        )
+    set_attestation_validator(
+        AttestationValidator(organiser_pubkey, config.EVENT_ID)
+    )
+    log.info("attestation enforcement on — event_id=%s", config.EVENT_ID)
 
     if config.BACKHAUL_ZONE_TABLE is None:
         check_backhaul_radio()  # diagnosis only — BLE service runs either way
