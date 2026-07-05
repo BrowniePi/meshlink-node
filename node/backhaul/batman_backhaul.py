@@ -69,6 +69,12 @@ class BatmanBackhaul(NodeBackhaul):
     def port(self) -> int:
         return self._sock.getsockname()[1]
 
+    def peer_count(self) -> int:
+        # Other nodes known to the zone table. On a live batman-adv mesh the
+        # ground truth would be `batctl n`; the static table is what this
+        # node's routing actually uses, so heartbeats report that.
+        return sum(1 for zone in self._zone_table if zone != self._zone_id)
+
     # -- NodeBackhaul (send direction) ------------------------------------
 
     def forward_to_zone(self, zone_id: int, packet: bytes) -> None:

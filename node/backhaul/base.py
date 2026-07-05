@@ -28,6 +28,13 @@ class NodeBackhaul(ABC):
         nodes. Default is a no-op: the Phase 2 stub had no receive direction,
         and a backhaul-less node simply never gets called back."""
 
+    def peer_count(self) -> int:
+        """Number of other nodes this node can reach over the backhaul.
+
+        Reported in the Phase 5 heartbeat as batman_peer_count. Default 0 for
+        backhaul-less nodes (the Phase 2 stub)."""
+        return 0
+
 
 class LoggingStubBackhaul(NodeBackhaul):
     """No-op stand-in from Phase 2: logs what a real backhaul would do.

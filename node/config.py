@@ -1,5 +1,6 @@
 """Node configuration."""
 import os
+import socket
 from pathlib import Path
 
 # The zone this node serves. Phase 3: each of the 3 test nodes is deployed
@@ -68,6 +69,10 @@ ORGANISER_KEY_CACHE = Path(
     os.environ.get("MESHLINK_ORGANISER_KEY_CACHE",
                    Path(__file__).resolve().parent.parent / "organiser_pubkey.hex")
 )
+
+# Heartbeat reporting (node → backend, fire-and-forget).
+NODE_ID = os.environ.get("MESHLINK_NODE_ID", socket.gethostname())
+HEARTBEAT_INTERVAL_S = float(os.environ.get("MESHLINK_HEARTBEAT_INTERVAL_S", "60"))
 
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"

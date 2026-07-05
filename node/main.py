@@ -42,6 +42,7 @@ def main() -> None:
     from node.backhaul.base import LoggingStubBackhaul
     from node.ble import create_gatt_server
     from node.core import set_attestation_validator
+    from node.monitoring.heartbeat_sender import HeartbeatSender
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
 
@@ -82,14 +83,25 @@ def main() -> None:
         zone_id=config.NODE_ZONE_ID,
     )
 
+    heartbeat = HeartbeatSender(
+        node_id=config.NODE_ID,
+        zone_id=config.NODE_ZONE_ID,
+        base_url=config.BACKEND_BASE_URL,
+        transport=transport,
+        backhaul=backhaul,
+        interval_s=config.HEARTBEAT_INTERVAL_S,
+    )
+
     backhaul.start()
     relay.start()
+    heartbeat.start()
     log.info("node up — zone_id=%d, advertising MeshLink service", config.NODE_ZONE_ID)
     try:
         server.run_forever()
     except KeyboardInterrupt:
         log.info("shutting down")
     finally:
+        heartbeat.stop()
         relay.stop()
         backhaul.stop()
 
