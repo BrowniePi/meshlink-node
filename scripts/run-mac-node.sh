@@ -7,36 +7,48 @@
 # BLE (CoreBluetooth), framing, dedup, the relay pipeline — is the same code
 # the Pi mesh runs. See docs/tests/mac-2node-relay-test.md.
 #
-# Usage (run on each Mac, same zone list, different zone id):
-#   ./scripts/run-mac-node.sh <this-zone-id> <zone1-ip> <zone2-ip> [zone3-ip ...]
+# Usage (run on each Mac — SAME zone=ip list, only <this-zone-id> differs):
+#   ./scripts/run-mac-node.sh <this-zone-id> <zone>=<ip> <zone>=<ip> [...]
 #
-# Example — Mac A serving zone 1, Mac B serving zone 2:
-#   Mac A:  ./scripts/run-mac-node.sh 1 192.168.1.10 192.168.1.11
-#   Mac B:  ./scripts/run-mac-node.sh 2 192.168.1.10 192.168.1.11
+# Zones need not be contiguous — match whatever destination zone the phone
+# app addresses. Example: app sends to zone 3, so Mac A serves zone 1 and
+# Mac B serves zone 3:
+#   Mac A:  ./scripts/run-mac-node.sh 1 1=192.168.1.10 3=192.168.1.11
+#   Mac B:  ./scripts/run-mac-node.sh 3 1=192.168.1.10 3=192.168.1.11
 #
-# Override auto-detection with MESHLINK_LOCAL_IP=<addr> if the wrong
+# Override IP auto-detection with MESHLINK_LOCAL_IP=<addr> if the wrong
 # interface is picked (e.g. VPN/utun up).
 set -euo pipefail
 
-if [[ $# -lt 3 ]]; then
-    echo "Usage: $0 <this-zone-id> <zone1-ip> <zone2-ip> [zone3-ip ...]" >&2
-    echo "  e.g. $0 1 192.168.1.10 192.168.1.11   # this Mac serves zone 1" >&2
+if [[ $# -lt 2 ]]; then
+    echo "Usage: $0 <this-zone-id> <zone>=<ip> <zone>=<ip> [...]" >&2
+    echo "  e.g. $0 1 1=192.168.1.10 3=192.168.1.11   # this Mac serves zone 1" >&2
     exit 1
 fi
 
 ZONE_ID="$1"; shift
-if ! [[ "$ZONE_ID" =~ ^[0-9]+$ ]] || (( ZONE_ID < 1 )) || (( ZONE_ID > $# )); then
-    echo "First arg must be this node's zone id (1..$#), one of the IPs that follow." >&2
+if ! [[ "$ZONE_ID" =~ ^[0-9]+$ ]]; then
+    echo "First arg must be this node's numeric zone id." >&2
     exit 1
 fi
 
-# Build "1=ip1,2=ip2,..." from the positional IPs (zone N ↔ Nth IP).
-zone=1
+# Build the "zone=ip,zone=ip" table from the pairs; capture this zone's IP.
 table=""
-for ip in "$@"; do
-    table+="${table:+,}${zone}=${ip}"
-    zone=$((zone + 1))
+own_entry_ip=""
+for pair in "$@"; do
+    if [[ ! "$pair" =~ ^([0-9]+)=(.+)$ ]]; then
+        echo "Bad zone mapping '$pair' — expected <zone>=<ip>." >&2
+        exit 1
+    fi
+    z="${BASH_REMATCH[1]}"; ip="${BASH_REMATCH[2]}"
+    table+="${table:+,}${z}=${ip}"
+    [[ "$z" == "$ZONE_ID" ]] && own_entry_ip="$ip"
 done
+
+if [[ -z "$own_entry_ip" ]]; then
+    echo "This node's zone id ($ZONE_ID) is not in the zone list — add ${ZONE_ID}=<this Mac's IP>." >&2
+    exit 1
+fi
 
 # This node's own LAN IP (for the /24 broadcast address and a sanity check).
 local_ip="${MESHLINK_LOCAL_IP:-}"
@@ -47,12 +59,11 @@ if [[ -z "$local_ip" ]]; then
     done
 fi
 
-# Nth IP in the list is what peers expect for this zone — warn on mismatch.
-eval "own_entry_ip=\${$ZONE_ID}"
+# Peers send zone-$ZONE_ID traffic to own_entry_ip — warn if that's not us.
 if [[ -n "$local_ip" && "$own_entry_ip" != "$local_ip" ]]; then
     echo "WARNING: zone $ZONE_ID is mapped to $own_entry_ip in the table, but this" >&2
     echo "         Mac's LAN IP looks like $local_ip. Peers send zone-$ZONE_ID" >&2
-    echo "         traffic to $own_entry_ip — fix the argument order if that's wrong." >&2
+    echo "         traffic to $own_entry_ip — fix the ${ZONE_ID}=<ip> entry if wrong." >&2
 fi
 
 # Subnet broadcast for venue-wide (zone 0xFFFF) messages: x.y.z.255 (/24).
