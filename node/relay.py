@@ -32,9 +32,10 @@ def _describe_payload(payload: bytes) -> str:
 def decrement_ttl(raw: bytes) -> bytes:
     """Return the packet with ttl reduced by one hop.
 
-    The signature covers the ttl byte, so this technically invalidates it —
-    signature verification is a stub until Phase 4, which must resolve that
-    spec-level tension (mutable ttl inside the signed region) when it lands.
+    Safe against the Phase 4 Ed25519 check: the signed region deliberately
+    excludes the hop-mutable ttl and spray_L bytes (offsets 68-69, see
+    meshlink-core pipeline/message.py:signed_region and DECISIONS.md), so a
+    relay decrementing ttl here does not invalidate the sender's signature.
     """
     ttl = raw[_TTL_OFFSET]
     return raw[:_TTL_OFFSET] + bytes([ttl - 1]) + raw[_TTL_OFFSET + 1:]
