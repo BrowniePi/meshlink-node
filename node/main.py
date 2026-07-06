@@ -36,12 +36,11 @@ def main() -> None:
     # and unit tests never need the platform Bluetooth stack present.
     from node import config
     from node.attestation.organiser_key import load_organiser_pubkey
-    from node.attestation.token_cache import AttestationValidator
     from node.backhaul.batman_backhaul import BatmanBackhaul
     from node.backhaul.radio_config import check_backhaul_radio
     from node.backhaul.base import LoggingStubBackhaul
     from node.ble import create_gatt_server
-    from node.core import set_attestation_validator
+    from node.core import AttestationCache
     from node.monitoring.heartbeat_sender import HeartbeatSender
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
@@ -56,9 +55,7 @@ def main() -> None:
         organiser_pubkey = load_organiser_pubkey(
             config.BACKEND_BASE_URL, config.ORGANISER_KEY_CACHE
         )
-    set_attestation_validator(
-        AttestationValidator(organiser_pubkey, config.EVENT_ID)
-    )
+    attestation = AttestationCache(bytes.fromhex(organiser_pubkey), config.EVENT_ID)
     log.info("attestation enforcement on — event_id=%s", config.EVENT_ID)
 
     if config.BACKHAUL_ZONE_TABLE is None:
@@ -81,6 +78,7 @@ def main() -> None:
         transport=transport,
         backhaul=backhaul,
         zone_id=config.NODE_ZONE_ID,
+        attestation=attestation,
     )
 
     heartbeat = HeartbeatSender(

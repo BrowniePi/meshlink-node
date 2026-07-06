@@ -5,9 +5,11 @@ relayed to the node's other connected phones, and cross-node cases are handed
 to the NodeBackhaul interface (a logging stub until Phase 3).
 """
 import logging
+import time
 
+from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
 from node.backhaul.base import NodeBackhaul
-from node.core import Outcome, RelayPipeline, Transport
+from node.core import AttestationCache, Outcome, RelayPipeline, Transport, parse_packet
 
 log = logging.getLogger("meshlink.relay")
 
@@ -29,6 +31,30 @@ def _describe_payload(payload: bytes) -> str:
         return f"<{len(payload)} bytes: {payload[:32].hex()}{'…' if len(payload) > 32 else ''}>"
 
 
+def _summarize_packet(raw: bytes) -> str:
+    """Best-effort structural summary of a packet, independent of the
+    pipeline's own parse.
+
+    A packet can fail any check from step 2 onward (ttl/timestamp/dedup/
+    rate-limit/signature/attestation) after having parsed just fine — but
+    meshlink-core's PipelineResult only carries the parsed Message on
+    Outcome.DELIVER, never on Outcome.DROP. Re-parsing here independently is
+    the only way to see *which* sender/message a given drop was about, which
+    is what actually matters when debugging "why does this phone keep
+    getting dropped."
+    """
+    try:
+        msg = parse_packet(raw)
+    except ValueError as exc:
+        return f"<unparseable, {len(raw)} bytes: {exc}>"
+    age_s = int(time.time()) - msg.timestamp
+    return (
+        f"msg_id={msg.msg_id.hex()[:8]} sender={msg.sender_key.hex()[:16]} "
+        f"ephem={msg.ephem_id.hex()[:8]} ttl={msg.ttl} zone={msg.zone_id} "
+        f"msg_type={msg.msg_type} age={age_s}s payload={_describe_payload(msg.payload)}"
+    )
+
+
 def decrement_ttl(raw: bytes) -> bytes:
     """Return the packet with ttl reduced by one hop.
 
@@ -42,11 +68,22 @@ def decrement_ttl(raw: bytes) -> bytes:
 
 
 class NodeRelay:
-    def __init__(self, transport: Transport, backhaul: NodeBackhaul, zone_id: int):
+    def __init__(
+        self,
+        transport: Transport,
+        backhaul: NodeBackhaul,
+        zone_id: int,
+        attestation: AttestationCache | None = None,
+    ):
         self._transport = transport
         self._backhaul = backhaul
         self._zone_id = zone_id
-        self._pipeline = RelayPipeline()
+        self._attestation = attestation
+        self._pipeline = RelayPipeline(attestation=attestation)
+        # Presentation packets validate structure/replay/signature like any
+        # other packet, but must never be gated on attestation themselves —
+        # a sender presenting its first token isn't attested yet.
+        self._presentation_pipeline = RelayPipeline()
         transport.on_receive(self._handle_packet)
         # Packets arriving from other nodes run the same pipeline as BLE
         # traffic (dedup is what stops cross-node loops). No-op on the stub.
@@ -59,7 +96,15 @@ class NodeRelay:
         self._transport.stop()
 
     def _handle_packet(self, peer_id: str, raw: bytes) -> None:
-        log.info("received %d-byte packet from %s", len(raw), peer_id)
+        log.info(
+            "received %d-byte packet from %s: %s",
+            len(raw), peer_id, _summarize_packet(raw),
+        )
+
+        if self._attestation is not None and _is_attestation_presentation(raw):
+            self._handle_presentation(peer_id, raw)
+            return
+
         result = self._pipeline.process(raw)
         if result.outcome == Outcome.DROP:
             log.info("drop from %s: %s", peer_id, result.drop_reason)
@@ -79,18 +124,6 @@ class NodeRelay:
         elif msg.zone_id != self._zone_id:
             self._backhaul.forward_to_zone(msg.zone_id, raw)
 
-        # A verified attestation presentation (Outcome.RELAY) is swallowed
-        # here: the sender is now in this node's validated cache, and the
-        # backhaul forward above lets other nodes learn it too — but phones
-        # never see it (a JWT blob means nothing to the app layer).
-        if result.outcome == Outcome.RELAY:
-            log.info(
-                "attestation presentation from %s accepted — sender %s cached, "
-                "not delivered to phones",
-                peer_id, msg.sender_key.hex()[:16],
-            )
-            return
-
         # Phase 2: single node, single zone — every accepted message is also
         # relayed to the local BLE cell regardless of its zone_id.
         relayed = decrement_ttl(raw)
@@ -102,3 +135,36 @@ class NodeRelay:
             "relayed msg %s from %s (zone %d, ttl %d→%d)",
             msg.msg_id.hex()[:8], peer_id, msg.zone_id, msg.ttl, msg.ttl - 1,
         )
+
+    def _handle_presentation(self, peer_id: str, raw: bytes) -> None:
+        """Validate a token presentation and cache its sender — never
+        delivered to phones (a JWT blob means nothing at the app layer), but
+        spread over the backhaul so other nodes learn the sender too."""
+        result = self._presentation_pipeline.process(raw)
+        if result.outcome == Outcome.DROP:
+            log.info("presentation drop from %s: %s", peer_id, result.drop_reason)
+            return
+
+        msg = result.message
+        try:
+            sender_key = self._attestation.add_token(msg.payload.decode("ascii"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            log.info("attestation presentation from %s rejected: %s", peer_id, exc)
+            return
+
+        log.info(
+            "attestation presentation from %s accepted — sender %s cached, "
+            "not delivered to phones",
+            peer_id, sender_key.hex()[:16],
+        )
+        if msg.zone_id == BROADCAST_ZONE:
+            self._backhaul.broadcast_to_all_nodes(raw)
+        elif msg.zone_id != self._zone_id:
+            self._backhaul.forward_to_zone(msg.zone_id, raw)
+
+
+def _is_attestation_presentation(raw: bytes) -> bool:
+    try:
+        return parse_packet(raw).msg_type == MSG_TYPE_ATTESTATION_PRESENT
+    except ValueError:
+        return False

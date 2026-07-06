@@ -32,16 +32,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
 from node.attestation.organiser_key import load_organiser_pubkey
-from node.attestation.token_cache import AttestationValidator
 from node.backhaul.batman_backhaul import BatmanBackhaul
-from node.core import Transport, set_attestation_validator
+from node.core import AttestationCache, Transport
 from node.monitoring.heartbeat_sender import HeartbeatSender
 from node.relay import BROADCAST_ZONE, NodeRelay
 
 from identity.keygen import generate_keypair  # vendored meshlink-core
 from identity.signing import build_signed_packet
-from pipeline.attestation_check import MSG_TYPE_ATTESTATION
 
 MSG_TYPE_TEXT = 0x01
 NODE1_PORT = 19801
@@ -112,7 +111,7 @@ def call(base, method, path, body=None):
 def start_node(zone_id, base_url, phones):
     cache = Path(tempfile.mkdtemp()) / "organiser_pubkey.hex"
     pub_hex = load_organiser_pubkey(base_url, cache)  # the one boot-time call
-    set_attestation_validator(AttestationValidator(pub_hex, "test-event-001"))
+    attestation = AttestationCache(bytes.fromhex(pub_hex), "test-event-001")
     transport = PhoneTransport(phones)
     backhaul = BatmanBackhaul(
         zone_id=zone_id,
@@ -120,7 +119,10 @@ def start_node(zone_id, base_url, phones):
         broadcast_addr=ZONE_TABLE[2 if zone_id == 1 else 1],
         bind=("127.0.0.1", ZONE_TABLE[zone_id][1]),
     )
-    relay = NodeRelay(transport=transport, backhaul=backhaul, zone_id=zone_id)
+    relay = NodeRelay(
+        transport=transport, backhaul=backhaul, zone_id=zone_id,
+        attestation=attestation,
+    )
     backhaul.start()
     relay.start()
     return transport, backhaul, relay
@@ -209,7 +211,7 @@ def main():
 
         print("\n=== Device A presents its token to node 1 ===")
         transport.inject("phoneA",
-                         device_a.packet(MSG_TYPE_ATTESTATION, token.encode()))
+                         device_a.packet(MSG_TYPE_ATTESTATION_PRESENT, token.encode()))
         time.sleep(1.0)  # presentation spreads to node 2 over the backhaul
 
         print("\n=== Device A (attested) sends a text — relays via backhaul to node 2 / phone C ===")
@@ -231,7 +233,7 @@ def main():
                                           device_b, args.base_url).items():
             print(f"--- presenting {label} ---")
             transport.inject("phoneB",
-                             device_b.packet(MSG_TYPE_ATTESTATION, bad.encode()))
+                             device_b.packet(MSG_TYPE_ATTESTATION_PRESENT, bad.encode()))
         print("--- Device B retries a normal text (still unattested) ---")
         transport.inject("phoneB", device_b.packet(MSG_TYPE_TEXT, b"still here"))
 
