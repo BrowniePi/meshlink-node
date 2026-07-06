@@ -56,6 +56,25 @@ Run the node in the foreground:
 python3 -m node.main
 ```
 
+### Attestation (Phase 5)
+
+Since Phase 5, pipeline step 7 enforces ticket-bound attestation tokens against
+a running `meshlink-backend` — set the event ID to match whatever the backend
+issued tokens for (defaults to `test-event-001`), and point at the backend if
+it's not on `127.0.0.1:8000`:
+
+```bash
+MESHLINK_EVENT_ID=meshlink-demo \
+MESHLINK_BACKEND_URL=http://127.0.0.1:8000 \
+python3 -m node.main
+```
+
+The node fetches and caches the organiser's public key from the backend once
+at boot (`GET /attestation/public-key`); every token verification after that
+is fully offline. `MESHLINK_ORGANISER_PUBKEY` (64 hex chars) skips that fetch
+entirely — useful for air-gapped bench setups or tests, but must be the real
+key the backend signs tokens with, or every presentation is rejected.
+
 ### Run on boot (systemd)
 
 ```bash
