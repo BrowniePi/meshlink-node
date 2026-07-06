@@ -1,7 +1,8 @@
 """MeshLink node entrypoint.
 
-Phase 2: single node acting as a BLE GATT peripheral, relaying messages
-between connected phones via the shared meshlink-core pipeline.
+Phase 3: BLE GATT peripheral relaying messages between connected phones
+via the shared meshlink-core pipeline, plus the batman-adv backhaul
+relaying cross-zone traffic between nodes.
 """
 import logging
 import sys
@@ -34,27 +35,73 @@ def main() -> None:
     # Heavy imports happen here so `python3 -m node.main --help`-style tooling
     # and unit tests never need the platform Bluetooth stack present.
     from node import config
+    from node.attestation.organiser_key import load_organiser_pubkey
+    from node.backhaul.batman_backhaul import BatmanBackhaul
+    from node.backhaul.radio_config import check_backhaul_radio
     from node.backhaul.base import LoggingStubBackhaul
     from node.ble import create_gatt_server
+    from node.core import AttestationCache
+    from node.monitoring.heartbeat_sender import HeartbeatSender
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
 
+    # Phase 5: attestation enforcement. One backend call per boot (or none,
+    # with the env override); every token verification afterwards is offline.
+    if config.ORGANISER_PUBKEY:
+        organiser_pubkey = config.ORGANISER_PUBKEY
+        log.info("organiser public key from MESHLINK_ORGANISER_PUBKEY: %s",
+                 organiser_pubkey)
+    else:
+        organiser_pubkey = load_organiser_pubkey(
+            config.BACKEND_BASE_URL, config.ORGANISER_KEY_CACHE
+        )
+    attestation = AttestationCache(bytes.fromhex(organiser_pubkey), config.EVENT_ID)
+    log.info("attestation enforcement on — event_id=%s", config.EVENT_ID)
+
+    if config.BACKHAUL_ZONE_TABLE is None:
+        check_backhaul_radio()  # diagnosis only — BLE service runs either way
+    else:
+        # Dev override (e.g. a Mac node on a plain LAN/loopback): no batman-adv
+        # radio to check, the zone table is explicit rather than 10.77.0.x.
+        log.info("backhaul using MESHLINK_ZONE_TABLE override — skipping "
+                 "batman-adv radio check")
+
     server = create_gatt_server()
     transport = BleTransport(server)
+    backhaul = BatmanBackhaul(
+        zone_id=config.NODE_ZONE_ID,
+        zone_table=config.BACKHAUL_ZONE_TABLE,  # None → the static 10.77.0.x table
+        broadcast_addr=config.BACKHAUL_BROADCAST_ADDR,
+        bind=("0.0.0.0", config.BACKHAUL_UDP_PORT),
+    )
     relay = NodeRelay(
         transport=transport,
-        backhaul=LoggingStubBackhaul(),
+        backhaul=backhaul,
         zone_id=config.NODE_ZONE_ID,
+        attestation=attestation,
     )
 
+    heartbeat = HeartbeatSender(
+        node_id=config.NODE_ID,
+        zone_id=config.NODE_ZONE_ID,
+        base_url=config.BACKEND_BASE_URL,
+        transport=transport,
+        backhaul=backhaul,
+        interval_s=config.HEARTBEAT_INTERVAL_S,
+    )
+
+    backhaul.start()
     relay.start()
+    heartbeat.start()
     log.info("node up — zone_id=%d, advertising MeshLink service", config.NODE_ZONE_ID)
     try:
         server.run_forever()
     except KeyboardInterrupt:
         log.info("shutting down")
     finally:
+        heartbeat.stop()
         relay.stop()
+        backhaul.stop()
 
 
 if __name__ == "__main__":

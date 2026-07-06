@@ -10,6 +10,18 @@ dependencies = [
     "PyGObject; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     # CoreBluetooth bindings for the macOS development backend.
     "pyobjc-framework-CoreBluetooth; sys_platform == 'darwin'",
+    # meshlink-core (Phase 4) runtime crypto/dedup deps. Core is vendored as a
+    # git submodule rather than pip-installed (see node/core/__init__.py), so
+    # its own pyproject dependencies aren't resolved for us — they're declared
+    # here and must stay in sync with vendor/meshlink-core/pyproject.toml.
+    "pynacl>=1.6.2",      # Ed25519 signing/verification (libsodium)
+    "pybloom-live>=4.0.0",  # dedup Bloom filter
+    "blake3>=1.0.9",      # ephemeral-id derivation
+    # Phase 5 attestation token verification (pipeline step 7). Same pair the
+    # backend uses to issue tokens — versions kept aligned with
+    # meshlink-backend/pyproject.toml.
+    "pyjwt>=2.9",         # EdDSA compact JWT decode
+    "cryptography>=43",   # Ed25519 public key for PyJWT
 ]
 
 [project.optional-dependencies]

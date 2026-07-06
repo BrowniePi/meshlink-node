@@ -30,11 +30,13 @@ from pipeline.message import (  # noqa: E402
     Message,
     parse_packet,
 )
+from pipeline.attestation_check import AttestationCache  # noqa: E402
 from pipeline.pipeline import Outcome, PipelineResult, RelayPipeline  # noqa: E402
 from routing.spray_and_wait import split_copies  # noqa: E402
 from transport.base import Transport  # noqa: E402
 
 __all__ = [
+    "AttestationCache",
     "HEADER_SIZE",
     "MAX_PACKET",
     "MIN_PACKET",

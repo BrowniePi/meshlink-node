@@ -1,10 +1,78 @@
 """Node configuration."""
+import os
+import socket
+from pathlib import Path
 
-# The zone this node serves. Hardcoded for Phase 2 — there is one node and
-# one zone, and NodeRelay treats every message as local to this zone (no
-# multi-zone routing logic exists yet). Phase 7 replaces this constant with
-# dynamic zone assignment at deployment.
-NODE_ZONE_ID = 1
+# The zone this node serves. Phase 3: each of the 3 test nodes is deployed
+# with a distinct zone via MESHLINK_ZONE_ID (1, 2, or 3 — matching its
+# entry in node/backhaul/static_zone_table.py), replacing Phase 2's single
+# hardcoded value. Phase 7 replaces this env-var hand-wiring with dynamic
+# zone assignment at deployment.
+NODE_ZONE_ID = int(os.environ.get("MESHLINK_ZONE_ID", "1"))
+
+# Backhaul (batman-adv) networking — see node/backhaul/batman_backhaul.py.
+BACKHAUL_UDP_PORT = int(os.environ.get("MESHLINK_BACKHAUL_PORT", "19788"))  # 0x4D4C — "ML"
+BACKHAUL_BROADCAST_ADDR = "10.77.0.255"  # mesh subnet broadcast (10.77.0.0/24)
+
+
+def parse_addr(text):
+    """Parse "host" or "host:port" into a batman_backhaul Addr.
+
+    A bare host keeps the caller's default port; "host:port" pins both — the
+    latter lets several dev nodes share one machine on loopback. IPv4 only
+    (the backhaul socket is AF_INET), so a lone ":" always means host:port.
+    """
+    text = text.strip()
+    host, sep, port = text.rpartition(":")
+    return (host, int(port)) if sep else text
+
+
+def parse_zone_table(text):
+    """Parse "1=host,2=host:port,…" into a {zone_id: Addr} table."""
+    table = {}
+    for entry in text.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        zone, _, addr = entry.partition("=")
+        table[int(zone)] = parse_addr(addr)
+    return table
+
+
+# Backhaul address overrides for development on machines without batman-adv
+# (e.g. Mac dev nodes on a plain LAN or on loopback). Same override pattern as
+# MESHLINK_BLE_BACKEND. Unset → the batman-adv 10.77.0.x scheme above.
+#   MESHLINK_ZONE_TABLE="1=192.168.1.10,2=192.168.1.11:19789"
+#   MESHLINK_BACKHAUL_BROADCAST_ADDR="192.168.1.255"
+_zone_table_env = os.environ.get("MESHLINK_ZONE_TABLE")
+BACKHAUL_ZONE_TABLE = parse_zone_table(_zone_table_env) if _zone_table_env else None
+
+_broadcast_env = os.environ.get("MESHLINK_BACKHAUL_BROADCAST_ADDR")
+if _broadcast_env:
+    BACKHAUL_BROADCAST_ADDR = parse_addr(_broadcast_env)
+
+# Phase 5 — meshlink-backend integration. The backend is only ever touched
+# off the message path: one organiser-key fetch at boot plus the 60 s
+# heartbeat. Mesh messages never leave the venue network.
+BACKEND_BASE_URL = os.environ.get("MESHLINK_BACKEND_URL", "http://127.0.0.1:8000")
+
+# Event this node is deployed for; attestation tokens for any other eid are
+# rejected at pipeline step 7. Must match the event_id the app purchases
+# tickets for (backend caps it at 25 chars to keep tokens small).
+EVENT_ID = os.environ.get("MESHLINK_EVENT_ID", "test-event-001")
+
+# Organiser Ed25519 public key (64 hex chars). Normally fetched from the
+# backend at startup and cached to disk; the env var skips the fetch entirely
+# (tests, air-gapped bench setups).
+ORGANISER_PUBKEY = os.environ.get("MESHLINK_ORGANISER_PUBKEY")
+ORGANISER_KEY_CACHE = Path(
+    os.environ.get("MESHLINK_ORGANISER_KEY_CACHE",
+                   Path(__file__).resolve().parent.parent / "organiser_pubkey.hex")
+)
+
+# Heartbeat reporting (node → backend, fire-and-forget).
+NODE_ID = os.environ.get("MESHLINK_NODE_ID", socket.gethostname())
+HEARTBEAT_INTERVAL_S = float(os.environ.get("MESHLINK_HEARTBEAT_INTERVAL_S", "60"))
 
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"

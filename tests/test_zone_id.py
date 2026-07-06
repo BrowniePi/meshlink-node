@@ -22,12 +22,13 @@ def test_node_zone_id_is_configured():
 
 
 def test_relay_treats_own_zone_as_local():
+    from node.backhaul.base import NodeBackhaul
     from node.relay import NodeRelay
     from tests.helpers import FakeTransport
 
     transport = FakeTransport(["phoneA", "phoneB"])
 
-    class NoBackhaul:
+    class NoBackhaul(NodeBackhaul):
         def forward_to_zone(self, zone_id, packet):
             raise AssertionError("own-zone message must not hit the backhaul")
 
