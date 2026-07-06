@@ -39,11 +39,17 @@ WiFi Mesh Add-On doc leave open. Everything else follows those docs directly.
   cross-node key material (mobility domain, r0kh/r1kh) — that belongs with
   Phase 7's dynamic node coordination.
 
-- **No changes to the node process (`main.py`)/relay.** Tasks 1–2 are system
-  configuration; keeping the running node byte-identical to Phase 5 makes
-  the "toggle off ⇒ identical to Phase 5" demo criterion hold trivially.
-  The boot self-check is `scripts/verify_ssid_consistency.sh`, not runtime
-  Python (the phone-facing WiFi transport arrives with the app-side task).
+- **Tasks 1–2 left the node process (`main.py`)/relay untouched** — they are
+  system configuration; the boot self-check is
+  `scripts/verify_ssid_consistency.sh`, not runtime Python. The phone-facing
+  WiFi listener then arrived with the app-side transport task:
+  `node/transport/wifi_transport.py` (persistent TCP on
+  `MESHLINK_WIFI_LISTEN`, default 10.78.0.1:7800, same 2-byte framing as
+  BLE) fanned in through `node/transport/multi_transport.py`. The relay
+  pipeline is unchanged; a node whose listen address can't bind — or with
+  `MESHLINK_WIFI_LISTEN=off` — runs byte-identically to Phase 5, so the
+  "toggle off ⇒ identical to Phase 5" demo criterion still holds. See the
+  app repo's docs/phase6-app-decisions.md for the wire-protocol rationale.
 
 - **hostapd run via the distro service** (`DAEMON_CONF` →
   `/etc/hostapd/meshlink.conf`) rather than a custom systemd unit — fewest

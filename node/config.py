@@ -74,6 +74,13 @@ ORGANISER_KEY_CACHE = Path(
 NODE_ID = os.environ.get("MESHLINK_NODE_ID", socket.gethostname())
 HEARTBEAT_INTERVAL_S = float(os.environ.get("MESHLINK_HEARTBEAT_INTERVAL_S", "60"))
 
+# Phase 6 — phone-facing WiFi listener (node/transport/wifi_transport.py).
+# Default binds the hostapd AP address (scripts/setup_hostapd.sh); dev
+# machines without that interface degrade to BLE-only automatically, and
+# "off" disables the listener outright. Must match the app's
+# MESHLINK_WIFI_NODE_HOST/PORT dart-defines.
+WIFI_LISTEN = os.environ.get("MESHLINK_WIFI_LISTEN", "10.78.0.1:7800")
+
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"
 RX_CHAR_UUID = "4d455348-4c49-4e4b-0002-000000000002"  # centrals write inbound

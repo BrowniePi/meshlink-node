@@ -44,6 +44,8 @@ def main() -> None:
     from node.monitoring.heartbeat_sender import HeartbeatSender
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
+    from node.transport.multi_transport import MultiTransport
+    from node.transport.wifi_transport import WifiTransport
 
     # Phase 5: attestation enforcement. One backend call per boot (or none,
     # with the env override); every token verification afterwards is offline.
@@ -68,6 +70,12 @@ def main() -> None:
 
     server = create_gatt_server()
     transport = BleTransport(server)
+    if config.WIFI_LISTEN.lower() != "off":
+        # Phase 6: serve phones over the hostapd AP as well. Binding fails
+        # harmlessly on machines without the AP interface (BLE-only, exactly
+        # Phase 5 behavior).
+        wifi_host, wifi_port = config.parse_addr(config.WIFI_LISTEN)
+        transport = MultiTransport(transport, WifiTransport(wifi_host, wifi_port))
     backhaul = BatmanBackhaul(
         zone_id=config.NODE_ZONE_ID,
         zone_table=config.BACKHAUL_ZONE_TABLE,  # None → the static 10.77.0.x table
