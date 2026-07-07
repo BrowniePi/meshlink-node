@@ -5,6 +5,7 @@ relayed to the node's other connected phones, and cross-node cases are handed
 to the NodeBackhaul interface (a logging stub until Phase 3).
 """
 import logging
+import threading
 import time
 
 from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
@@ -80,6 +81,18 @@ class NodeRelay:
         self._zone_id = zone_id
         self._attestation = attestation
         self._pipeline = RelayPipeline(attestation=attestation)
+        # Traffic counters since boot, reported in heartbeats. Guarded by a
+        # lock because BLE and backhaul receives arrive on different threads.
+        self._stats_lock = threading.Lock()
+        self._stats = {
+            "received": 0,             # packets handed to the relay
+            "accepted": 0,             # passed the pipeline
+            "dropped": 0,              # rejected by the pipeline
+            "relayed_to_phones": 0,    # accepted msgs fanned out locally
+            "forwarded_cross_zone": 0, # sent to one other zone via backhaul
+            "broadcast_to_nodes": 0,   # flooded to every node via backhaul
+            "attestations_cached": 0,  # token presentations accepted
+        }
         # Presentation packets validate structure/replay/signature like any
         # other packet, but must never be gated on attestation themselves —
         # a sender presenting its first token isn't attested yet.
@@ -88,6 +101,15 @@ class NodeRelay:
         # Packets arriving from other nodes run the same pipeline as BLE
         # traffic (dedup is what stops cross-node loops). No-op on the stub.
         backhaul.on_receive(self._handle_packet)
+
+    def _count(self, key: str, n: int = 1) -> None:
+        with self._stats_lock:
+            self._stats[key] += n
+
+    def stats(self) -> dict:
+        """Snapshot of the since-boot traffic counters (for heartbeats)."""
+        with self._stats_lock:
+            return dict(self._stats)
 
     def start(self) -> None:
         self._transport.start()
@@ -100,6 +122,7 @@ class NodeRelay:
             "received %d-byte packet from %s: %s",
             len(raw), peer_id, _summarize_packet(raw),
         )
+        self._count("received")
 
         if self._attestation is not None and _is_attestation_presentation(raw):
             self._handle_presentation(peer_id, raw)
@@ -108,9 +131,11 @@ class NodeRelay:
         result = self._pipeline.process(raw)
         if result.outcome == Outcome.DROP:
             log.info("drop from %s: %s", peer_id, result.drop_reason)
+            self._count("dropped")
             return
 
         msg = result.message
+        self._count("accepted")
         log.info(
             "accepted msg %s from %s: %s",
             msg.msg_id.hex()[:8], peer_id, _describe_payload(msg.payload),
@@ -121,8 +146,10 @@ class NodeRelay:
         # Phase 3 only has to supply a real implementation.
         if msg.zone_id == BROADCAST_ZONE:
             self._backhaul.broadcast_to_all_nodes(raw)
+            self._count("broadcast_to_nodes")
         elif msg.zone_id != self._zone_id:
             self._backhaul.forward_to_zone(msg.zone_id, raw)
+            self._count("forwarded_cross_zone")
 
         # Phase 2: single node, single zone — every accepted message is also
         # relayed to the local BLE cell regardless of its zone_id.
@@ -131,6 +158,7 @@ class NodeRelay:
             if peer == peer_id:
                 continue
             self._transport.send(peer, relayed)
+        self._count("relayed_to_phones")
         log.info(
             "relayed msg %s from %s (zone %d, ttl %d→%d)",
             msg.msg_id.hex()[:8], peer_id, msg.zone_id, msg.ttl, msg.ttl - 1,
@@ -143,6 +171,7 @@ class NodeRelay:
         result = self._presentation_pipeline.process(raw)
         if result.outcome == Outcome.DROP:
             log.info("presentation drop from %s: %s", peer_id, result.drop_reason)
+            self._count("dropped")
             return
 
         msg = result.message
@@ -150,7 +179,9 @@ class NodeRelay:
             sender_key = self._attestation.add_token(msg.payload.decode("ascii"))
         except (UnicodeDecodeError, ValueError) as exc:
             log.info("attestation presentation from %s rejected: %s", peer_id, exc)
+            self._count("dropped")
             return
+        self._count("attestations_cached")
 
         log.info(
             "attestation presentation from %s accepted — sender %s cached, "

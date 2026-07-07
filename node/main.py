@@ -70,12 +70,14 @@ def main() -> None:
 
     server = create_gatt_server()
     transport = BleTransport(server)
+    ap_provisioner = None
     if config.WIFI_LISTEN.lower() != "off":
         # Phase 6: serve phones over the hostapd AP as well. Binding fails
         # harmlessly on machines without the AP interface (BLE-only, exactly
         # Phase 5 behavior).
         wifi_host, wifi_port = config.parse_addr(config.WIFI_LISTEN)
         transport = MultiTransport(transport, WifiTransport(wifi_host, wifi_port))
+        ap_provisioner = _provision_ap(log)
     backhaul = BatmanBackhaul(
         zone_id=config.NODE_ZONE_ID,
         zone_table=config.BACKHAUL_ZONE_TABLE,  # None → the static 10.77.0.x table
@@ -92,9 +94,11 @@ def main() -> None:
     heartbeat = HeartbeatSender(
         node_id=config.NODE_ID,
         zone_id=config.NODE_ZONE_ID,
+        zone_name=config.NODE_ZONE_NAME,
         base_url=config.BACKEND_BASE_URL,
         transport=transport,
         backhaul=backhaul,
+        relay=relay,
         interval_s=config.HEARTBEAT_INTERVAL_S,
     )
 
@@ -110,6 +114,41 @@ def main() -> None:
         heartbeat.stop()
         relay.stop()
         backhaul.stop()
+        if ap_provisioner is not None:
+            ap_provisioner.stop()
+
+
+def _provision_ap(log):
+    """Bring up the phone-facing AP if this platform/config wants us to.
+
+    Best-effort: any failure downgrades to BLE + WiFi-listener (Phase 5
+    behavior), never aborts the node. Returns the provisioner (so its stop()
+    can tear the AP down on shutdown) or None.
+    """
+    from node import config
+    mode = config.WIFI_AP_PROVISION
+    if mode == "off":
+        return None
+    if mode == "auto" and sys.platform != "darwin":
+        # Pi default: scripts/setup_hostapd.sh + systemd own the AP out of
+        # band. MESHLINK_AP_PROVISION=on forces the node to drive it instead.
+        return None
+
+    from node.wifi_ap import create_ap_provisioner
+    from node.wifi_ap.deployment_config import load_deployment_config
+    try:
+        deployment = load_deployment_config()
+    except ValueError as exc:
+        log.warning("phone-facing AP not provisioned: %s", exc)
+        return None
+
+    provisioner = create_ap_provisioner(deployment)
+    if provisioner.start():
+        log.info("phone-facing AP up — SSID %r", deployment.ssid)
+    else:
+        log.info("phone-facing AP not brought up — serving WiFi listener + "
+                 "BLE only")
+    return provisioner
 
 
 if __name__ == "__main__":

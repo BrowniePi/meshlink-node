@@ -55,3 +55,29 @@ WiFi Mesh Add-On doc leave open. Everything else follows those docs directly.
   `/etc/hostapd/meshlink.conf`) rather than a custom systemd unit — fewest
   moving parts on Raspberry Pi OS; config file is root-only (mode 600)
   since it embeds the passphrase.
+
+- **macOS dev-parity AP backend (Internet Sharing).** Mirroring the BLE
+  split (`node/ble` bluez vs corebluetooth), AP bring-up is now a
+  platform-selected `ApProvisioner` behind `node/wifi_ap.create_ap_provisioner()`:
+  `HostapdProvisioner` (drives `setup_hostapd.sh`) on the Pi,
+  `InternetSharingProvisioner` on a Mac, override `MESHLINK_AP_BACKEND`. macOS
+  has no hostapd, so the dev backend configures the built-in Wi-Fi card as an
+  AP via SystemConfiguration's `com.apple.nat.plist` + the
+  `com.apple.NetworkSharing` launchd job. It is explicitly **dev/test parity
+  only** (the WiFi twin of the CoreBluetooth backend), not a deployment
+  target: enabling it needs root, takes the Wi-Fi card over (dropping any
+  joined network), and Apple gates the real toggle behind a GUI — so
+  `start()` is best-effort (writes the SSID/passphrase so a manual toggle
+  uses them, tries to kick the job, else logs exact instructions). The
+  SSID self-check drops the on-air leg on Mac (a single radio can't scan for
+  its own AP); `verify_consistency()` compares the deployment config against
+  the plist we wrote (config ↔ live-config, phone-side for on-air).
+
+- **`main.py` now optionally provisions the AP** via
+  `MESHLINK_AP_PROVISION` (default `auto`): provisions on macOS but **not**
+  on the Pi, where `setup_hostapd.sh` + systemd still own it out of band (so
+  Tasks 1–2's "`main.py` untouched" property holds on the Pi unchanged).
+  `on`/`off` force it. Provisioning is best-effort and never fatal — a
+  missing/invalid deployment config, no root, or a failed bring-up all
+  degrade to BLE + WiFi-listener (byte-identical to Phase 5), never abort
+  the node.

@@ -1,20 +1,32 @@
 """Heartbeat reporting: node → backend, every 60 s, fire-and-forget.
 
 The node half of the Phase 5 monitoring task (backend ingestion is
-POST /heartbeat). This is the only node→internet traffic — mesh messages
-stay on the venue network. A beat that fails (backend down, no uplink,
-timeout) is logged and skipped; it must never affect relay service.
+POST /heartbeat), widened in Phase 7 to the v2 payload the organiser
+dashboard reads: zone id+name, battery, per-transport phone lists, relay
+traffic counters, and host health. Payload template lives in
+docs/heartbeat-payload.md — keep the two in sync.
+
+This is the only node→internet traffic — mesh messages stay on the venue
+network, and no message *content* ever appears here, only counters. A beat
+that fails (backend down, no uplink, timeout) is logged and skipped; it
+must never affect relay service.
 """
 import json
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 import urllib.request
 
 from node.backhaul.base import NodeBackhaul
 from node.core import Transport
+from node.monitoring.battery import read_battery
+from node.monitoring.system_stats import read_system_stats
+from node.transport.wifi_transport import WIFI_PEER_PREFIX
 
 log = logging.getLogger("meshlink.heartbeat")
+
+HEARTBEAT_VERSION = 2
 
 
 class HeartbeatSender:
@@ -22,17 +34,21 @@ class HeartbeatSender:
         self,
         node_id: str,
         zone_id: int,
+        zone_name: str,
         base_url: str,
         transport: Transport,
         backhaul: NodeBackhaul,
+        relay=None,  # anything with .stats() -> dict; None → no relay block
         interval_s: float = 60.0,
         timeout_s: float = 3.0,
     ):
         self._node_id = node_id
         self._zone_id = zone_id
+        self._zone_name = zone_name
         self._url = f"{base_url.rstrip('/')}/heartbeat"
         self._transport = transport
         self._backhaul = backhaul
+        self._relay = relay
         self._interval_s = interval_s
         self._timeout_s = timeout_s
         self._started_at: float | None = None
@@ -57,15 +73,32 @@ class HeartbeatSender:
         while not self._stop.wait(self._interval_s):
             self.beat()
 
+    def build_payload(self) -> dict:
+        """The v2 heartbeat body (see docs/heartbeat-payload.md)."""
+        peers = self._transport.list_peers()
+        wifi_peers = [p for p in peers if p.startswith(WIFI_PEER_PREFIX)]
+        return {
+            "heartbeat_version": HEARTBEAT_VERSION,
+            "node_id": self._node_id,
+            "zone_id": self._zone_id,
+            "zone_name": self._zone_name,
+            "sent_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "uptime_s": int(time.monotonic() - self._started_at),
+            "connected_phone_count": len(peers),
+            "batman_peer_count": self._backhaul.peer_count(),
+            "phones": {
+                "ble_count": len(peers) - len(wifi_peers),
+                "wifi_count": len(wifi_peers),
+                "peers": peers,
+            },
+            "battery": read_battery(),
+            "relay": self._relay.stats() if self._relay is not None else None,
+            "system": read_system_stats(),
+        }
+
     def beat(self) -> None:
         """Send one heartbeat; failures are logged, never raised."""
-        body = {
-            "node_id": self._node_id,
-            "uptime_s": int(time.monotonic() - self._started_at),
-            "connected_phone_count": len(self._transport.list_peers()),
-            "zone_id": self._zone_id,
-            "batman_peer_count": self._backhaul.peer_count(),
-        }
+        body = self.build_payload()
         req = urllib.request.Request(
             self._url,
             data=json.dumps(body).encode(),

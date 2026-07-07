@@ -10,6 +10,12 @@ from pathlib import Path
 # zone assignment at deployment.
 NODE_ZONE_ID = int(os.environ.get("MESHLINK_ZONE_ID", "1"))
 
+# Human-readable zone label for the organiser dashboard ("Main Stage",
+# "Food Court"…). A zone can be served by several nodes, so this names the
+# *zone*, not the node — every node in a zone should carry the same value.
+# Purely cosmetic: routing keys off NODE_ZONE_ID alone.
+NODE_ZONE_NAME = os.environ.get("MESHLINK_ZONE_NAME", f"Zone {NODE_ZONE_ID}")
+
 # Backhaul (batman-adv) networking — see node/backhaul/batman_backhaul.py.
 BACKHAUL_UDP_PORT = int(os.environ.get("MESHLINK_BACKHAUL_PORT", "19788"))  # 0x4D4C — "ML"
 BACKHAUL_BROADCAST_ADDR = "10.77.0.255"  # mesh subnet broadcast (10.77.0.0/24)
@@ -80,6 +86,14 @@ HEARTBEAT_INTERVAL_S = float(os.environ.get("MESHLINK_HEARTBEAT_INTERVAL_S", "60
 # "off" disables the listener outright. Must match the app's
 # MESHLINK_WIFI_NODE_HOST/PORT dart-defines.
 WIFI_LISTEN = os.environ.get("MESHLINK_WIFI_LISTEN", "10.78.0.1:7800")
+
+# Whether main.py itself brings up the phone-facing AP (node/wifi_ap).
+# "auto": provision on macOS (the Internet Sharing dev-parity backend, the
+# WiFi twin of MESHLINK_BLE_BACKEND=corebluetooth) but NOT on the Pi, where
+# scripts/setup_hostapd.sh + systemd own the AP out of band — Phase 6 Tasks
+# 1-2 deliberately kept main.py out of AP setup. "on"/"off" force it either
+# way. Backend override: MESHLINK_AP_BACKEND=hostapd|internet_sharing.
+WIFI_AP_PROVISION = os.environ.get("MESHLINK_AP_PROVISION", "auto").lower()
 
 # GATT layout — must match meshlink-app lib/transport/ble_transport.dart.
 MESH_SERVICE_UUID = "4d455348-4c49-4e4b-0001-000000000001"

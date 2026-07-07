@@ -52,6 +52,60 @@ sudo iw dev <iface> scan | grep -B5 'SSID: MeshLink-Network' | grep ^BSS
 
 Expect one BSS line per node, all carrying the same SSID.
 
+## macOS dev machines (Internet Sharing backend)
+
+The Pi path above uses hostapd. On a Mac — for developing/testing a node
+without Pi hardware, the WiFi twin of the CoreBluetooth BLE backend — AP
+bring-up goes through macOS Internet Sharing instead, selected automatically
+(`sys.platform == "darwin"`; override with `MESHLINK_AP_BACKEND`).
+
+This is **dev/test parity only**, not a deployment target: enabling Internet
+Sharing needs root and takes the built-in Wi-Fi card over as an AP, dropping
+whatever network the Mac was joined to.
+
+```sh
+# 1. Point at a local deployment config (no /etc/meshlink on a Mac):
+export MESHLINK_WIFI_DEPLOYMENT_CONF="$PWD/wifi_deployment.conf"
+
+# 2. Run the node as root so it can configure Internet Sharing. It writes the
+#    SSID/passphrase into com.apple.nat.plist and kicks com.apple.NetworkSharing.
+MESHLINK_AP_PROVISION=on sudo -E python3 -m node.main
+```
+
+If you run the node **without** root, it won't touch networking — it logs the
+exact System Settings steps (General > Sharing > Internet Sharing, share to
+Wi-Fi, Wi-Fi Options with the deployment SSID/passphrase) and the node still
+serves the WiFi listener + BLE. Because Apple gates the real toggle behind a
+GUI and the plist schema drifts between releases, treat bring-up as
+best-effort: if the phone can't see the SSID, enable Internet Sharing by hand
+(the SSID/passphrase are already configured for you).
+
+**Known limitation — single-radio laptops with no spare uplink (2026-07-07):**
+tested live on a MacBook whose only network connection is the built-in Wi-Fi
+card itself (no Ethernet/Thunderbolt adapter plugged in). `start()` reported
+success — the `nat.plist` config is accepted, `com.apple.NetworkSharing`
+reports `running`, and `verify_consistency()` passes because it only checks
+that the plist carries our SSID — but the phone got `ETIMEDOUT` joining, and
+the actual AP radio interface (`ap1`) never came up (`ifconfig ap1` showed
+`status: none`). Root cause: macOS Internet Sharing's Wi-Fi hotspot mode
+shares an *existing* internet connection from one interface out over
+another; it needs a distinct "share from" source (Ethernet, Thunderbolt,
+another phone's Personal Hotspot, etc.). A laptop whose only connection is
+its own Wi-Fi radio has no valid source, so the daemon accepts the config but
+never actually broadcasts — and no GUI toggle fixes this, since the Wi-Fi
+chip can't be both the client connection and the AP at once. There is no
+software workaround for this in `InternetSharingProvisioner`; it needs a
+non-Wi-Fi uplink (an Ethernet/USB-C dongle, or another device's hotspot as
+the source) to actually work. Until then, treat the macOS AP backend as
+untested/inert on typical single-radio laptops — the WiFi *listener*
+(`node/transport/wifi_transport.py`) still works fine bound to the Mac's
+normal Wi-Fi IP if you join the same existing network as the phone instead of
+trying to host a new SSID from the Mac.
+
+On-air SSID verification is phone-side on macOS (a single radio can't scan for
+its own hosted AP); the node's self-check compares the deployment config
+against what it wrote into the plist.
+
 ## Updating the SSID/passphrase later
 
 Repeat steps 1–3 with the new values on **all** nodes in one maintenance
