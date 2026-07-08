@@ -116,6 +116,26 @@ def test_query_without_valid_token_gets_nothing(rig):
     assert transport.sent == []  # silent, uniform refusal
 
 
+def test_direct_message_relays_opaque_and_is_not_node_terminated(rig):
+    """DIRECT_MESSAGE (0x0D) is ordinary relay traffic: fanned out like TEXT,
+    never consumed by the location service — and the node carries it opaque
+    (the text is sealed to the recipient; only the plaintext hint is visible)."""
+    from friends.wire import encode_direct_message
+
+    relay, transport, store = rig
+    dm = build_signed_packet(
+        TARGET, ephem_id=b"\x01" * 16, ttl=3, spray_l=1, zone_id=ZONE,
+        msg_type=MessageType.DIRECT_MESSAGE,
+        payload=encode_direct_message("meet at gate B", b"\x11" * 8, REQ_CURVE_PUB),
+    )
+    transport.deliver("phone-target", dm)
+
+    fanned_to = {p for p, _ in transport.sent}
+    assert fanned_to == {"phone-requester", "phone-other"}
+    assert relay.stats()["location_terminated"] == 0
+    assert all(b"meet at gate B" not in raw for _, raw in transport.sent)
+
+
 def test_revoke_feeds_set_and_still_relays_to_phones(rig):
     relay, transport, store = rig
     transport.deliver("phone-target", beacon_packet())
