@@ -42,6 +42,7 @@ def main() -> None:
     from node.ble import create_gatt_server
     from node.core import AttestationCache
     from node.monitoring.heartbeat_sender import HeartbeatSender
+    from node.monitoring.phone_ping import PhonePingService
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
     from node.transport.multi_transport import MultiTransport
@@ -84,11 +85,18 @@ def main() -> None:
         broadcast_addr=config.BACKHAUL_BROADCAST_ADDR,
         bind=("0.0.0.0", config.BACKHAUL_UDP_PORT),
     )
+    # Phase 7: ask each connected phone for location + battery every 2 min;
+    # the latest answers ride the heartbeat as phone_telemetry.
+    phone_ping = PhonePingService(
+        transport=transport,
+        interval_s=config.PHONE_PING_INTERVAL_S,
+    )
     relay = NodeRelay(
         transport=transport,
         backhaul=backhaul,
         zone_id=config.NODE_ZONE_ID,
         attestation=attestation,
+        phone_ping=phone_ping,
     )
 
     heartbeat = HeartbeatSender(
@@ -99,11 +107,13 @@ def main() -> None:
         transport=transport,
         backhaul=backhaul,
         relay=relay,
+        phone_ping=phone_ping,
         interval_s=config.HEARTBEAT_INTERVAL_S,
     )
 
     backhaul.start()
     relay.start()
+    phone_ping.start()
     heartbeat.start()
     log.info("node up — zone_id=%d, advertising MeshLink service", config.NODE_ZONE_ID)
     try:
@@ -112,6 +122,7 @@ def main() -> None:
         log.info("shutting down")
     finally:
         heartbeat.stop()
+        phone_ping.stop()
         relay.stop()
         backhaul.stop()
         if ap_provisioner is not None:

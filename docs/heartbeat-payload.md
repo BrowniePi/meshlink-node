@@ -44,6 +44,13 @@ status only — never message content, sender keys, or payloads.
     "attestations_cached": 12
   },
 
+  "phone_telemetry": {
+    "reports": [
+      {"peer_id": "AA:BB:CC:DD:EE:FF", "lat": 51.5074, "lon": -0.1278, "battery": 84, "charging": true, "age_s": 12},
+      {"peer_id": "wifi:10.78.0.17:52310", "lat": null, "lon": null, "battery": 9, "charging": null, "age_s": 130}
+    ]
+  },
+
   "system": {
     "platform": "Linux-6.6.31-v8-aarch64-with-glibc2.36",
     "cpu_temp_c": 51.2,
@@ -69,6 +76,13 @@ status only — never message content, sender keys, or payloads.
 | `phones.peers` | string[] | Transport-level peer ids: BLE addresses, and `wifi:<ip>:<port>` for WiFi. Ephemeral (change on reconnect) — good for "what's connected right now", useless as stable phone identity. |
 | `battery` | object \| **null** | `null` = no battery (mains-powered bench Pi, Mac mini) or read failure — don't render as 0 %. `charging` false means actively draining. `source` is `pmset` (Mac) or `sysfs:<supply>` (Pi/Linux battery HAT). |
 | `relay` | object \| null | Since-boot counters (reset with `uptime_s`). `received = accepted + dropped` (+ attestation presentations). Store raw; compute rates in the dashboard from consecutive beats. |
+| `phone_telemetry` | object \| null | Latest phone-ping answer per connected phone; `null` on a node not running the ping service. See below. |
+| `phone_telemetry.reports[]` | array | One entry per phone that answered recently. The node keeps only the latest report per phone and drops it after 3 missed pings (3 × `MESHLINK_PHONE_PING_INTERVAL_S`, default 3 × 120 s), so entries vanish on their own when a phone leaves. Source: `node/monitoring/phone_ping.py`; wire contract in meshlink-app `docs/phone-ping-app-spec.md`. |
+| ⤷ `peer_id` | string | Transport-level peer id (same namespace as `phones.peers`) — not a stable user identity. |
+| ⤷ `lat`, `lon` | number \| null | WGS-84; `null` when the phone couldn't or wasn't allowed to report location. |
+| ⤷ `battery` | int \| null | Percent 0–100; `null` when the phone's platform won't report it. |
+| ⤷ `charging` | bool \| null | `null` when the phone omitted it. |
+| ⤷ `age_s` | int | Seconds since this report was received by the node. |
 | `system` | object | Any field may be null on a platform that can't provide it (e.g. `cpu_temp_c`/`mem_used_percent` on Mac dev nodes). |
 
 ## Backend expectations

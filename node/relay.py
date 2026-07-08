@@ -11,6 +11,7 @@ import time
 from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
 from node.backhaul.base import NodeBackhaul
 from node.core import AttestationCache, Outcome, RelayPipeline, Transport, parse_packet
+from node.monitoring.phone_ping import PhonePingService, is_telemetry_frame
 
 log = logging.getLogger("meshlink.relay")
 
@@ -75,11 +76,13 @@ class NodeRelay:
         backhaul: NodeBackhaul,
         zone_id: int,
         attestation: AttestationCache | None = None,
+        phone_ping: PhonePingService | None = None,
     ):
         self._transport = transport
         self._backhaul = backhaul
         self._zone_id = zone_id
         self._attestation = attestation
+        self._phone_ping = phone_ping
         self._pipeline = RelayPipeline(attestation=attestation)
         # Traffic counters since boot, reported in heartbeats. Guarded by a
         # lock because BLE and backhaul receives arrive on different threads.
@@ -118,6 +121,16 @@ class NodeRelay:
         self._transport.stop()
 
     def _handle_packet(self, peer_id: str, raw: bytes) -> None:
+        # Phase 7 telemetry demux: MLPP1 control frames (phone-ping pongs)
+        # are not signed mesh packets and must never enter the pipeline, be
+        # relayed to other phones, or count as relay traffic — a phone's
+        # location/battery leaves this node only as aggregated heartbeat
+        # telemetry.
+        if is_telemetry_frame(raw):
+            if self._phone_ping is not None:
+                self._phone_ping.handle_frame(peer_id, raw)
+            return
+
         log.info(
             "received %d-byte packet from %s: %s",
             len(raw), peer_id, _summarize_packet(raw),

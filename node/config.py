@@ -80,6 +80,11 @@ ORGANISER_KEY_CACHE = Path(
 NODE_ID = os.environ.get("MESHLINK_NODE_ID", socket.gethostname())
 HEARTBEAT_INTERVAL_S = float(os.environ.get("MESHLINK_HEARTBEAT_INTERVAL_S", "60"))
 
+# Phase 7 phone telemetry ping (node/monitoring/phone_ping.py): how often
+# each connected phone is asked for its location and battery. Reports age
+# out after 3 missed pings and ride the heartbeat's phone_telemetry block.
+PHONE_PING_INTERVAL_S = float(os.environ.get("MESHLINK_PHONE_PING_INTERVAL_S", "120"))
+
 # Phase 6 — phone-facing WiFi listener (node/transport/wifi_transport.py).
 # Default binds the hostapd AP address (scripts/setup_hostapd.sh); dev
 # machines without that interface degrade to BLE-only automatically, and
