@@ -87,6 +87,30 @@ def test_logging_stub_backhaul_is_a_noop(caplog):
     assert "no backhaul yet" in caplog.text
 
 
+def test_stats_count_traffic():
+    relay, transport, _ = make_relay(["phoneA", "phoneB"])
+    packet = build_packet(ttl=5, zone_id=ZONE)
+    transport.deliver("phoneA", packet)                       # accepted + relayed
+    transport.deliver("phoneB", decrement_ttl(packet))        # dedup drop
+    transport.deliver("phoneA", build_packet(msg_id=b"B" * 16, zone_id=7))
+    transport.deliver("phoneA", build_packet(msg_id=b"C" * 16,
+                                             zone_id=BROADCAST_ZONE))
+
+    stats = relay.stats()
+    assert stats["received"] == 4
+    assert stats["accepted"] == 3
+    assert stats["dropped"] == 1
+    assert stats["relayed_to_phones"] == 3
+    assert stats["forwarded_cross_zone"] == 1
+    assert stats["broadcast_to_nodes"] == 1
+
+
+def test_stats_snapshot_is_a_copy():
+    relay, _, _ = make_relay([])
+    relay.stats()["received"] = 999
+    assert relay.stats()["received"] == 0
+
+
 def test_start_stop_passthrough():
     relay, transport, _ = make_relay([])
     relay.start()

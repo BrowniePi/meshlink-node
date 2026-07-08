@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
 from node.attestation.organiser_key import load_organiser_pubkey
 from node.backhaul.batman_backhaul import BatmanBackhaul
+from node.backhaul.dynamic_zone_table import DynamicZoneTable
 from node.core import AttestationCache, Transport
 from node.monitoring.heartbeat_sender import HeartbeatSender
 from node.relay import BROADCAST_ZONE, NodeRelay
@@ -113,9 +114,12 @@ def start_node(zone_id, base_url, phones):
     pub_hex = load_organiser_pubkey(base_url, cache)  # the one boot-time call
     attestation = AttestationCache(bytes.fromhex(pub_hex), "test-event-001")
     transport = PhoneTransport(phones)
+    # ZONE_TABLE seeds the dynamic table as operator-pinned entries — this
+    # demo has no zone-sync gossip, so the seed is the whole routing table.
     backhaul = BatmanBackhaul(
         zone_id=zone_id,
-        zone_table=dict(ZONE_TABLE),
+        table=DynamicZoneTable(own_zone_id=zone_id, seed=dict(ZONE_TABLE)),
+        own_addr=ZONE_TABLE[zone_id],
         broadcast_addr=ZONE_TABLE[2 if zone_id == 1 else 1],
         bind=("127.0.0.1", ZONE_TABLE[zone_id][1]),
     )

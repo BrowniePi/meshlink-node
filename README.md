@@ -18,7 +18,10 @@ zone-routing table arrives in Phase 7.
 node/            main package
   ble/           GATT server (peripheral role): shared base + per-platform
                  backends (BlueZ on Linux/Pi, CoreBluetooth on macOS)
-  transport/     node-side Transport adapter (same interface as the app's)
+  transport/     node-side Transport adapters (BLE + WiFi), fanned in via
+                 multi_transport (same interface as the app's)
+  wifi_ap/       phone-facing WiFi AP (Phase 6): deployment SSID config +
+                 provisioner backends (hostapd on Pi, Internet Sharing on macOS)
   backhaul/      node-to-node backhaul (batman-adv UDP + static zone table)
   core/          import shim for the vendored meshlink-core package
   relay.py       wires transport → meshlink-core pipeline → peers/backhaul
@@ -55,6 +58,60 @@ Run the node in the foreground:
 ```bash
 python3 -m node.main
 ```
+
+### Attestation (Phase 5)
+
+Since Phase 5, pipeline step 7 enforces ticket-bound attestation tokens against
+a running `meshlink-backend` — set the event ID to match whatever the backend
+issued tokens for (defaults to `test-event-001`), and point at the backend if
+it's not on `127.0.0.1:8000`:
+
+```bash
+MESHLINK_EVENT_ID=meshlink-demo \
+MESHLINK_BACKEND_URL=http://127.0.0.1:8000 \
+python3 -m node.main
+```
+
+The node fetches and caches the organiser's public key from the backend once
+at boot (`GET /attestation/public-key`); every token verification after that
+is fully offline. `MESHLINK_ORGANISER_PUBKEY` (64 hex chars) skips that fetch
+entirely — useful for air-gapped bench setups or tests, but must be the real
+key the backend signs tokens with, or every presentation is rejected.
+
+### Phone-facing WiFi AP (Phase 6)
+
+Since Phase 6, phones can reach the node over **WiFi** as well as BLE. Two
+independent pieces:
+
+1. **The listener** — a persistent TCP server (`node/transport/wifi_transport.py`)
+   fanned in alongside BLE, on by default (`MESHLINK_WIFI_LISTEN`, default
+   `10.78.0.1:7800`; set `off` to disable). On a machine without the AP
+   interface it simply fails to bind and the node runs BLE-only — byte-identical
+   to Phase 5.
+2. **The AP** — a radio put into AP mode broadcasting the deployment-wide SSID
+   so phones can join. On the Pi this is system configuration run **out of
+   band** (idempotent, safe on every boot):
+
+```bash
+# One-time: push the deployment-wide SSID/passphrase, then bring the AP up
+sudo install -m 600 wifi_deployment.conf /etc/meshlink/wifi_deployment.conf
+sudo scripts/setup_hostapd.sh          # renders hostapd.conf + starts the AP
+scripts/verify_ssid_consistency.sh     # self-check: config ↔ hostapd ↔ on-air
+```
+
+Then run the node as usual — it now serves phones on **both** transports:
+
+```bash
+MESHLINK_EVENT_ID=meshlink-demo \
+MESHLINK_BACKEND_URL=http://127.0.0.1:8000 \
+python3 -m node.main
+```
+
+On the Pi, `main.py` deliberately leaves the AP to `setup_hostapd.sh` +
+systemd (`MESHLINK_AP_PROVISION` defaults to `auto` = provision on macOS only;
+set `on` to make the node process drive hostapd itself, `off` to skip). The
+full fleet procedure — pushing one SSID to every node and updating it later —
+is in `docs/wifi-ap-deployment.md`.
 
 ### Run on boot (systemd)
 
@@ -105,6 +162,49 @@ macOS-specific behaviour:
 - CoreBluetooth has no peripheral-side connect/disconnect events; peer
   presence is tracked via TX-characteristic subscribe/unsubscribe, and
   `peer_id` is the CBCentral identifier UUID rather than a device path.
+
+#### Phone-facing WiFi AP on macOS
+
+macOS has no hostapd, so the phone-facing AP uses **Internet Sharing** through
+the same `create_ap_provisioner()` abstraction that picks hostapd on the Pi
+(override `MESHLINK_AP_BACKEND=hostapd|internet_sharing`), mirroring the BLE
+backend split. This is **dev/test parity only**, not a deployment target:
+enabling it needs root and takes the Wi-Fi card over as an AP (dropping any
+network the Mac is joined to), and Apple gates the real toggle behind a GUI.
+
+```bash
+# Local deployment config (a Mac has no /etc/meshlink):
+cat > wifi_deployment.conf <<'EOF'
+ssid=MeshLink-Network
+passphrase=venue-secret-2026
+EOF
+
+# main.py auto-provisions the AP on macOS. Run as root (via the venv's python,
+# so PyObjC is on hand) so it can configure Internet Sharing:
+sudo -E PYTHONPATH=.:vendor/meshlink-core \
+  MESHLINK_WIFI_DEPLOYMENT_CONF=$PWD/wifi_deployment.conf \
+  MESHLINK_WIFI_LISTEN=0.0.0.0:7800 \
+  MESHLINK_EVENT_ID=meshlink-demo \
+  MESHLINK_BACKEND_URL=http://127.0.0.1:8000 \
+  .venv/bin/python -m node.main
+```
+
+**Why `MESHLINK_WIFI_LISTEN=0.0.0.0:7800` on macOS:** the listener defaults to
+the Pi's hostapd subnet (`10.78.0.1`), but macOS Internet Sharing stands up its
+own bridge interface on a *different* subnet (commonly `192.168.2.x` or
+`192.168.64.x`). Binding `0.0.0.0` accepts on whatever subnet Sharing picked —
+otherwise the listener can't bind and disables itself (`Errno 49, Can't assign
+requested address`) even though the AP is up. Find the Mac's address on the
+phone-facing net with `ifconfig | grep 'inet 192.168'` (the `bridgeNNN`
+interface); that IP is what the app's `MESHLINK_WIFI_NODE_HOST` must target.
+
+Without `sudo` the node won't touch networking — it logs the exact System
+Settings steps and still serves BLE. If the phone can't see the SSID even under
+root, enable **System Settings › General › Sharing › Internet Sharing** (share
+to Wi-Fi) by hand — the SSID/passphrase are already configured for you. On-air
+SSID verification is phone-side on macOS (a single radio can't scan for its own
+AP). Set `MESHLINK_AP_PROVISION=off` to skip AP bring-up entirely. See
+`docs/wifi-ap-deployment.md`.
 
 #### Backhaul between Mac dev nodes
 

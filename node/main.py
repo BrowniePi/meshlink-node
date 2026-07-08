@@ -37,13 +37,18 @@ def main() -> None:
     from node import config
     from node.attestation.organiser_key import load_organiser_pubkey
     from node.backhaul.batman_backhaul import BatmanBackhaul
+    from node.backhaul.dynamic_zone_table import DynamicZoneTable
     from node.backhaul.radio_config import check_backhaul_radio
     from node.backhaul.base import LoggingStubBackhaul
+    from node.backhaul.zone_sync import ZoneSync
     from node.ble import create_gatt_server
     from node.core import AttestationCache
     from node.monitoring.heartbeat_sender import HeartbeatSender
+    from node.monitoring.phone_ping import PhonePingService
     from node.relay import NodeRelay
     from node.transport.ble_transport import BleTransport
+    from node.transport.multi_transport import MultiTransport
+    from node.transport.wifi_transport import WifiTransport
 
     # Phase 5: attestation enforcement. One backend call per boot (or none,
     # with the env override); every token verification afterwards is offline.
@@ -68,30 +73,70 @@ def main() -> None:
 
     server = create_gatt_server()
     transport = BleTransport(server)
+    ap_provisioner = None
+    if config.WIFI_LISTEN.lower() != "off":
+        # Phase 6: serve phones over the hostapd AP as well. Binding fails
+        # harmlessly on machines without the AP interface (BLE-only, exactly
+        # Phase 5 behavior).
+        wifi_host, wifi_port = config.parse_addr(config.WIFI_LISTEN)
+        transport = MultiTransport(transport, WifiTransport(wifi_host, wifi_port))
+        ap_provisioner = _provision_ap(log)
+    # Phase 7: the zone→node table is learned at runtime over the backhaul
+    # (zone-sync gossip), not hand-wired. MESHLINK_ZONE_TABLE, if set, seeds it
+    # with never-expiring operator-pinned entries for dev nodes that have no
+    # mesh to learn from; a fresh learned entry always wins over the seed.
+    zone_table = DynamicZoneTable(
+        own_zone_id=config.NODE_ZONE_ID,
+        seed=config.BACKHAUL_ZONE_TABLE,
+        entry_ttl_s=config.ZONE_ENTRY_TTL_S,
+    )
     backhaul = BatmanBackhaul(
         zone_id=config.NODE_ZONE_ID,
-        zone_table=config.BACKHAUL_ZONE_TABLE,  # None → the static 10.77.0.x table
+        table=zone_table,
+        own_addr=config.BACKHAUL_ADVERTISE_ADDR,
         broadcast_addr=config.BACKHAUL_BROADCAST_ADDR,
         bind=("0.0.0.0", config.BACKHAUL_UDP_PORT),
+    )
+    # Gossip our zone assignment to peers and fold in theirs, re-syncing each
+    # heartbeat interval (docs/phase7-node-decisions.md).
+    zone_sync = ZoneSync(
+        backhaul=backhaul,
+        table=zone_table,
+        node_id=config.NODE_ID,
+        zone_id=config.NODE_ZONE_ID,
+        own_addr=config.BACKHAUL_ADVERTISE_ADDR,
+        interval_s=config.HEARTBEAT_INTERVAL_S,
+    )
+    # Phase 7: ask each connected phone for location + battery every 2 min;
+    # the latest answers ride the heartbeat as phone_telemetry.
+    phone_ping = PhonePingService(
+        transport=transport,
+        interval_s=config.PHONE_PING_INTERVAL_S,
     )
     relay = NodeRelay(
         transport=transport,
         backhaul=backhaul,
         zone_id=config.NODE_ZONE_ID,
         attestation=attestation,
+        phone_ping=phone_ping,
     )
 
     heartbeat = HeartbeatSender(
         node_id=config.NODE_ID,
         zone_id=config.NODE_ZONE_ID,
+        zone_name=config.NODE_ZONE_NAME,
         base_url=config.BACKEND_BASE_URL,
         transport=transport,
         backhaul=backhaul,
+        relay=relay,
+        phone_ping=phone_ping,
         interval_s=config.HEARTBEAT_INTERVAL_S,
     )
 
     backhaul.start()
+    zone_sync.start()
     relay.start()
+    phone_ping.start()
     heartbeat.start()
     log.info("node up — zone_id=%d, advertising MeshLink service", config.NODE_ZONE_ID)
     try:
@@ -100,8 +145,45 @@ def main() -> None:
         log.info("shutting down")
     finally:
         heartbeat.stop()
+        phone_ping.stop()
         relay.stop()
+        zone_sync.stop()
         backhaul.stop()
+        if ap_provisioner is not None:
+            ap_provisioner.stop()
+
+
+def _provision_ap(log):
+    """Bring up the phone-facing AP if this platform/config wants us to.
+
+    Best-effort: any failure downgrades to BLE + WiFi-listener (Phase 5
+    behavior), never aborts the node. Returns the provisioner (so its stop()
+    can tear the AP down on shutdown) or None.
+    """
+    from node import config
+    mode = config.WIFI_AP_PROVISION
+    if mode == "off":
+        return None
+    if mode == "auto" and sys.platform != "darwin":
+        # Pi default: scripts/setup_hostapd.sh + systemd own the AP out of
+        # band. MESHLINK_AP_PROVISION=on forces the node to drive it instead.
+        return None
+
+    from node.wifi_ap import create_ap_provisioner
+    from node.wifi_ap.deployment_config import load_deployment_config
+    try:
+        deployment = load_deployment_config()
+    except ValueError as exc:
+        log.warning("phone-facing AP not provisioned: %s", exc)
+        return None
+
+    provisioner = create_ap_provisioner(deployment)
+    if provisioner.start():
+        log.info("phone-facing AP up — SSID %r", deployment.ssid)
+    else:
+        log.info("phone-facing AP not brought up — serving WiFi listener + "
+                 "BLE only")
+    return provisioner
 
 
 if __name__ == "__main__":
