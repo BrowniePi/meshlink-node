@@ -32,16 +32,19 @@ class Inbox:
 
 def make_pair():
     """Nodes A (zone 1) and B (zone 2) on loopback, mutually addressed."""
-    zone_table: dict[int, tuple[str, int]] = {}
-    a = BatmanBackhaul(zone_id=1, zone_table=zone_table,
-                       broadcast_addr=("127.0.0.1", 1), bind=("127.0.0.1", 0))
-    b = BatmanBackhaul(zone_id=2, zone_table=zone_table,
-                       broadcast_addr=("127.0.0.1", 1), bind=("127.0.0.1", 0))
-    zone_table[1] = ("127.0.0.1", a.port)
-    zone_table[2] = ("127.0.0.1", b.port)
+    a = BatmanBackhaul(zone_id=1, broadcast_addr=("127.0.0.1", 1),
+                       bind=("127.0.0.1", 0))
+    b = BatmanBackhaul(zone_id=2, broadcast_addr=("127.0.0.1", 1),
+                       bind=("127.0.0.1", 0))
+    addr_a, addr_b = ("127.0.0.1", a.port), ("127.0.0.1", b.port)
+    # Stand in for zone-sync gossip: teach each node where the other lives and
+    # what its own advertised address is (the self-echo filter keys off it).
+    a._own_addr, b._own_addr = addr_a, addr_b
+    a._table.learn(2, addr_b)
+    b._table.learn(1, addr_a)
     # Loopback has no subnet broadcast — point "everyone" at the other node.
-    a._broadcast_addr = zone_table[2]
-    b._broadcast_addr = zone_table[1]
+    a._broadcast_addr = addr_b
+    b._broadcast_addr = addr_a
     return a, b
 
 

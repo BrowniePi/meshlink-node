@@ -28,6 +28,18 @@ class NodeBackhaul(ABC):
         nodes. Default is a no-op: the Phase 2 stub had no receive direction,
         and a backhaul-less node simply never gets called back."""
 
+    def broadcast_control(self, frame: bytes) -> None:
+        """Broadcast a control frame (a zone-sync announcement, not a mesh
+        message) to every other node. Rides the same backhaul as mesh traffic
+        but is demuxed to on_control() on arrival, so it never reaches the
+        relay or a phone (Phase 7 zone-sync). Default no-op: a backhaul-less
+        node has no peers to gossip with."""
+
+    def on_control(self, callback: Callable[[str, bytes], None]) -> None:
+        """Register callback(peer_id, frame) for inbound control frames (see
+        broadcast_control). Default no-op — the Phase 2 stub and backhaul-less
+        nodes never receive."""
+
     def peer_count(self) -> int:
         """Number of other nodes this node can reach over the backhaul.
 

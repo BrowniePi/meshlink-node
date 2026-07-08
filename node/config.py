@@ -3,11 +3,10 @@ import os
 import socket
 from pathlib import Path
 
-# The zone this node serves. Phase 3: each of the 3 test nodes is deployed
-# with a distinct zone via MESHLINK_ZONE_ID (1, 2, or 3 — matching its
-# entry in node/backhaul/static_zone_table.py), replacing Phase 2's single
-# hardcoded value. Phase 7 replaces this env-var hand-wiring with dynamic
-# zone assignment at deployment.
+# The zone this node serves. Each node is deployed with a distinct zone via
+# MESHLINK_ZONE_ID (replacing Phase 2's single hardcoded value); nodes learn
+# which zone every *other* node serves at runtime via zone-sync gossip
+# (node/backhaul/dynamic_zone_table.py), so only our own zone is configured.
 NODE_ZONE_ID = int(os.environ.get("MESHLINK_ZONE_ID", "1"))
 
 # Human-readable zone label for the organiser dashboard ("Main Stage",
@@ -45,9 +44,11 @@ def parse_zone_table(text):
     return table
 
 
-# Backhaul address overrides for development on machines without batman-adv
-# (e.g. Mac dev nodes on a plain LAN or on loopback). Same override pattern as
-# MESHLINK_BLE_BACKEND. Unset → the batman-adv 10.77.0.x scheme above.
+# Operator-pinned zone seed for development on machines without batman-adv
+# (e.g. Mac dev nodes on a plain LAN or on loopback) that have no zone-sync
+# gossip to learn from. Loaded as never-expiring fallback entries in the
+# dynamic table; a fresh learned entry for the same zone always wins. Same
+# override pattern as MESHLINK_BLE_BACKEND. Unset → learn everything live.
 #   MESHLINK_ZONE_TABLE="1=192.168.1.10,2=192.168.1.11:19789"
 #   MESHLINK_BACKHAUL_BROADCAST_ADDR="192.168.1.255"
 _zone_table_env = os.environ.get("MESHLINK_ZONE_TABLE")
@@ -56,6 +57,20 @@ BACKHAUL_ZONE_TABLE = parse_zone_table(_zone_table_env) if _zone_table_env else 
 _broadcast_env = os.environ.get("MESHLINK_BACKHAUL_BROADCAST_ADDR")
 if _broadcast_env:
     BACKHAUL_BROADCAST_ADDR = parse_addr(_broadcast_env)
+
+# Phase 7 dynamic zone-routing table (node/backhaul/dynamic_zone_table.py +
+# zone_sync.py), replacing Phase 3's static ZONE_TO_NODE_IP. See
+# docs/phase7-node-decisions.md.
+#   - The address we announce to peers as serving our zone. Defaults to the
+#     batman-adv zone N ↔ 10.77.0.N scheme; dev nodes on a LAN/loopback
+#     override it. Doubles as the self-echo filter for our own broadcasts.
+_advertise_env = os.environ.get("MESHLINK_BACKHAUL_ADVERTISE_ADDR")
+BACKHAUL_ADVERTISE_ADDR = (
+    parse_addr(_advertise_env) if _advertise_env else f"10.77.0.{NODE_ZONE_ID}"
+)
+#   - A learned entry is forgotten after this long without a re-announcement;
+#     default tolerates ~3 missed announcements at the 60 s heartbeat cadence.
+ZONE_ENTRY_TTL_S = float(os.environ.get("MESHLINK_ZONE_ENTRY_TTL_S", "180"))
 
 # Phase 5 — meshlink-backend integration. The backend is only ever touched
 # off the message path: one organiser-key fetch at boot plus the 60 s

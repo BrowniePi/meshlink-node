@@ -37,8 +37,10 @@ def main() -> None:
     from node import config
     from node.attestation.organiser_key import load_organiser_pubkey
     from node.backhaul.batman_backhaul import BatmanBackhaul
+    from node.backhaul.dynamic_zone_table import DynamicZoneTable
     from node.backhaul.radio_config import check_backhaul_radio
     from node.backhaul.base import LoggingStubBackhaul
+    from node.backhaul.zone_sync import ZoneSync
     from node.ble import create_gatt_server
     from node.core import AttestationCache
     from node.monitoring.heartbeat_sender import HeartbeatSender
@@ -79,11 +81,31 @@ def main() -> None:
         wifi_host, wifi_port = config.parse_addr(config.WIFI_LISTEN)
         transport = MultiTransport(transport, WifiTransport(wifi_host, wifi_port))
         ap_provisioner = _provision_ap(log)
+    # Phase 7: the zone→node table is learned at runtime over the backhaul
+    # (zone-sync gossip), not hand-wired. MESHLINK_ZONE_TABLE, if set, seeds it
+    # with never-expiring operator-pinned entries for dev nodes that have no
+    # mesh to learn from; a fresh learned entry always wins over the seed.
+    zone_table = DynamicZoneTable(
+        own_zone_id=config.NODE_ZONE_ID,
+        seed=config.BACKHAUL_ZONE_TABLE,
+        entry_ttl_s=config.ZONE_ENTRY_TTL_S,
+    )
     backhaul = BatmanBackhaul(
         zone_id=config.NODE_ZONE_ID,
-        zone_table=config.BACKHAUL_ZONE_TABLE,  # None → the static 10.77.0.x table
+        table=zone_table,
+        own_addr=config.BACKHAUL_ADVERTISE_ADDR,
         broadcast_addr=config.BACKHAUL_BROADCAST_ADDR,
         bind=("0.0.0.0", config.BACKHAUL_UDP_PORT),
+    )
+    # Gossip our zone assignment to peers and fold in theirs, re-syncing each
+    # heartbeat interval (docs/phase7-node-decisions.md).
+    zone_sync = ZoneSync(
+        backhaul=backhaul,
+        table=zone_table,
+        node_id=config.NODE_ID,
+        zone_id=config.NODE_ZONE_ID,
+        own_addr=config.BACKHAUL_ADVERTISE_ADDR,
+        interval_s=config.HEARTBEAT_INTERVAL_S,
     )
     # Phase 7: ask each connected phone for location + battery every 2 min;
     # the latest answers ride the heartbeat as phone_telemetry.
@@ -112,6 +134,7 @@ def main() -> None:
     )
 
     backhaul.start()
+    zone_sync.start()
     relay.start()
     phone_ping.start()
     heartbeat.start()
@@ -124,6 +147,7 @@ def main() -> None:
         heartbeat.stop()
         phone_ping.stop()
         relay.stop()
+        zone_sync.stop()
         backhaul.stop()
         if ap_provisioner is not None:
             ap_provisioner.stop()
