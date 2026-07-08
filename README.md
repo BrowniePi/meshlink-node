@@ -78,6 +78,35 @@ is fully offline. `MESHLINK_ORGANISER_PUBKEY` (64 hex chars) skips that fetch
 entirely — useful for air-gapped bench setups or tests, but must be the real
 key the backend signs tokens with, or every presentation is rejected.
 
+### Friends & node-served location (Friendship branch)
+
+The node terminates `LOCATION` beacons and `LOCATION_QUERY` messages after
+the full 8-step pipeline accept: it keeps each sharer's **latest coordinate
+only** (overwrite, never append), and answers a query only when it carries a
+capability token signed by the target's own key — verified against the user
+directory the node syncs from the backend (offline-capable disk cache, so a
+backend outage doesn't break serving). Refusals are silent and observably
+identical whatever the reason. See `docs/node-served-location.md`.
+
+No new required config — the same two variables as attestation cover it:
+
+```bash
+MESHLINK_EVENT_ID=meshlink-demo \
+MESHLINK_BACKEND_URL=http://192.168.1.14:8000 \
+python3 -m node.main
+```
+
+(`192.168.1.14` = the machine running `meshlink-backend`; on that machine
+itself `127.0.0.1:8000` is fine. The event id must match the app builds.)
+
+Optional knobs:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MESHLINK_NODE_IDENTITY` | `node_identity.json` | Node's own Ed25519 keypair for signing LOCATION_RESPONSEs (created on first boot) |
+| `MESHLINK_DIRECTORY_CACHE` | `directory_cache.json` | On-disk user directory cache, refreshed from `GET /directory/sync` at heartbeat cadence |
+| `MESHLINK_LOCATION_QUERY_MIN_INTERVAL_S` | `60` | Per-(requester, target) query rate limit |
+
 ### Phone-facing WiFi AP (Phase 6)
 
 Since Phase 6, phones can reach the node over **WiFi** as well as BLE. Two
