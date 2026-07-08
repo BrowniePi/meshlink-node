@@ -21,6 +21,7 @@ import urllib.request
 from node.backhaul.base import NodeBackhaul
 from node.core import Transport
 from node.monitoring.battery import read_battery
+from node.monitoring.phone_ping import PhonePingService
 from node.monitoring.system_stats import read_system_stats
 from node.transport.wifi_transport import WIFI_PEER_PREFIX
 
@@ -39,6 +40,7 @@ class HeartbeatSender:
         transport: Transport,
         backhaul: NodeBackhaul,
         relay=None,  # anything with .stats() -> dict; None → no relay block
+        phone_ping: PhonePingService | None = None,
         interval_s: float = 60.0,
         timeout_s: float = 3.0,
     ):
@@ -49,6 +51,7 @@ class HeartbeatSender:
         self._transport = transport
         self._backhaul = backhaul
         self._relay = relay
+        self._phone_ping = phone_ping
         self._interval_s = interval_s
         self._timeout_s = timeout_s
         self._started_at: float | None = None
@@ -93,6 +96,10 @@ class HeartbeatSender:
             },
             "battery": read_battery(),
             "relay": self._relay.stats() if self._relay is not None else None,
+            "phone_telemetry": (
+                {"reports": self._phone_ping.reports()}
+                if self._phone_ping is not None else None
+            ),
             "system": read_system_stats(),
         }
 

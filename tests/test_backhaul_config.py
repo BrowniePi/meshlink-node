@@ -26,12 +26,19 @@ def test_parse_zone_table_mixes_bare_and_ported_hosts():
 
 def test_zone_table_override_drives_backhaul_routing():
     from node.backhaul.batman_backhaul import BatmanBackhaul
+    from node.backhaul.dynamic_zone_table import DynamicZoneTable
 
-    table = config.parse_zone_table("2=127.0.0.1:1")
-    b = BatmanBackhaul(zone_id=1, zone_table=table, bind=("127.0.0.1", 0))
+    # MESHLINK_ZONE_TABLE now seeds the dynamic table as operator-pinned
+    # entries rather than being the whole static table (Phase 7).
+    seed = config.parse_zone_table("2=127.0.0.1:1")
+    b = BatmanBackhaul(
+        zone_id=1,
+        table=DynamicZoneTable(own_zone_id=1, seed=seed),
+        bind=("127.0.0.1", 0),
+    )
     try:
         # Zone 2 resolves to the override endpoint, not 10.77.0.2.
-        assert b._zone_table[2] == ("127.0.0.1", 1)
+        assert b._table.addr_for(2) == ("127.0.0.1", 1)
     finally:
         b.stop()
 
