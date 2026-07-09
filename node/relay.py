@@ -11,6 +11,7 @@ import time
 from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
 from node.backhaul.base import NodeBackhaul
 from node.core import AttestationCache, Outcome, RelayPipeline, Transport, parse_packet
+from node.location.service import LocationService
 from node.monitoring.phone_ping import PhonePingService, is_telemetry_frame
 
 log = logging.getLogger("meshlink.relay")
@@ -77,12 +78,14 @@ class NodeRelay:
         zone_id: int,
         attestation: AttestationCache | None = None,
         phone_ping: PhonePingService | None = None,
+        location: LocationService | None = None,
     ):
         self._transport = transport
         self._backhaul = backhaul
         self._zone_id = zone_id
         self._attestation = attestation
         self._phone_ping = phone_ping
+        self._location = location
         self._pipeline = RelayPipeline(attestation=attestation)
         # Traffic counters since boot, reported in heartbeats. Guarded by a
         # lock because BLE and backhaul receives arrive on different threads.
@@ -95,6 +98,7 @@ class NodeRelay:
             "forwarded_cross_zone": 0, # sent to one other zone via backhaul
             "broadcast_to_nodes": 0,   # flooded to every node via backhaul
             "attestations_cached": 0,  # token presentations accepted
+            "location_terminated": 0,  # beacons/queries consumed at this node
         }
         # Presentation packets validate structure/replay/signature like any
         # other packet, but must never be gated on attestation themselves —
@@ -153,6 +157,17 @@ class NodeRelay:
             "accepted msg %s from %s: %s",
             msg.msg_id.hex()[:8], peer_id, _describe_payload(msg.payload),
         )
+
+        # Node-terminated location traffic (Phase 5 friendship extension).
+        # Runs after the full pipeline accepted the packet — the capability
+        # check is an additional step after step 8 routing, never a bypass of
+        # steps 1-7. Consumed messages (beacons, queries) are NOT fanned out:
+        # a raw coordinate or a location query must never reach other phones.
+        if self._location is not None and self._location.handle_node_terminated(
+            peer_id, msg
+        ):
+            self._count("location_terminated")
+            return
 
         # Cross-node cases go through the backhaul interface. With one node
         # it's a logging stub — but routing already speaks in these terms so

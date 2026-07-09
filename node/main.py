@@ -42,7 +42,11 @@ def main() -> None:
     from node.backhaul.base import LoggingStubBackhaul
     from node.backhaul.zone_sync import ZoneSync
     from node.ble import create_gatt_server
-    from node.core import AttestationCache
+    from node.core import AttestationCache, load_or_create_identity
+    from node.directory.cache import DirectoryCache
+    from node.location.authz import LocationAuthz
+    from node.location.service import LocationService
+    from node.location.store import LocationStore
     from node.monitoring.heartbeat_sender import HeartbeatSender
     from node.monitoring.phone_ping import PhonePingService
     from node.relay import NodeRelay
@@ -113,12 +117,34 @@ def main() -> None:
         transport=transport,
         interval_s=config.PHONE_PING_INTERVAL_S,
     )
+    # Phase 5 friendship extension: capability-gated location serving. The
+    # directory cache is the node's offline copy of {username, pubkeys};
+    # the store holds one (latest) coordinate per identity, nothing more.
+    directory = DirectoryCache(
+        base_url=config.BACKEND_BASE_URL,
+        cache_path=config.DIRECTORY_CACHE,
+        event_id=config.EVENT_ID,
+        refresh_interval_s=config.HEARTBEAT_INTERVAL_S,
+    )
+    location_store = LocationStore()
+    location = LocationService(
+        store=location_store,
+        authz=LocationAuthz(
+            store=location_store,
+            directory=directory,
+            query_min_interval_s=config.LOCATION_QUERY_MIN_INTERVAL_S,
+        ),
+        transport=transport,
+        node_identity=load_or_create_identity(config.NODE_IDENTITY_PATH),
+        zone_id=config.NODE_ZONE_ID,
+    )
     relay = NodeRelay(
         transport=transport,
         backhaul=backhaul,
         zone_id=config.NODE_ZONE_ID,
         attestation=attestation,
         phone_ping=phone_ping,
+        location=location,
     )
 
     heartbeat = HeartbeatSender(
@@ -137,6 +163,7 @@ def main() -> None:
     zone_sync.start()
     relay.start()
     phone_ping.start()
+    directory.start()
     heartbeat.start()
     log.info("node up — zone_id=%d, advertising MeshLink service", config.NODE_ZONE_ID)
     try:
@@ -145,6 +172,7 @@ def main() -> None:
         log.info("shutting down")
     finally:
         heartbeat.stop()
+        directory.stop()
         phone_ping.stop()
         relay.stop()
         zone_sync.stop()

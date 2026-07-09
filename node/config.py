@@ -95,6 +95,26 @@ ORGANISER_KEY_CACHE = Path(
 NODE_ID = os.environ.get("MESHLINK_NODE_ID", socket.gethostname())
 HEARTBEAT_INTERVAL_S = float(os.environ.get("MESHLINK_HEARTBEAT_INTERVAL_S", "60"))
 
+# Phase 5 friendship extension — node-served location.
+#   - Node's own signing identity for LOCATION_RESPONSE packets (generated on
+#     first boot, core identity format).
+NODE_IDENTITY_PATH = Path(
+    os.environ.get("MESHLINK_NODE_IDENTITY",
+                   Path(__file__).resolve().parent.parent / "node_identity.json")
+)
+#   - Offline-capable user directory copy, synced from the backend's
+#     /directory/sync at the heartbeat cadence (node/directory/cache.py).
+DIRECTORY_CACHE = Path(
+    os.environ.get("MESHLINK_DIRECTORY_CACHE",
+                   Path(__file__).resolve().parent.parent / "directory_cache.json")
+)
+#   - Per (requester, target) floor between served location queries: even a
+#     friend with a valid capability token cannot poll a position into a
+#     fine-grained track (query-side of the retention invariant).
+LOCATION_QUERY_MIN_INTERVAL_S = float(
+    os.environ.get("MESHLINK_LOCATION_QUERY_MIN_INTERVAL_S", "60")
+)
+
 # Phase 7 phone telemetry ping (node/monitoring/phone_ping.py): how often
 # each connected phone is asked for its location and battery. Reports age
 # out after 3 missed pings and ride the heartbeat's phone_telemetry block.
