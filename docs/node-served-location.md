@@ -58,6 +58,11 @@ not built now.
   telemetry remains a separate, unsigned ops path feeding heartbeats only;
   the signed LOCATION beacon is the consent-driven sharing path. Distinct
   purposes, deliberately not merged.
+- DIRECT_MESSAGE (0x0D, friend-to-friend text) is the opposite: ordinary
+  relay traffic, fanned out like TEXT and never node-terminated. The node
+  carries it opaque — the text is sealed to the recipient's X25519 key, so
+  only the 8-byte recipient hint is visible in transit
+  (`tests/test_location_relay.py::test_direct_message_relays_opaque_and_is_not_node_terminated`).
 - Queries are answered from this node's own store. Cross-zone lookups
   (target beaconing to a different node) are out of scope for this phase —
   the query is refused identically to unknown-user.
