@@ -1,6 +1,7 @@
 """Node configuration."""
 import os
 import socket
+import sys
 from pathlib import Path
 
 # The zone this node serves. Each node is deployed with a distinct zone via
@@ -74,8 +75,28 @@ ZONE_ENTRY_TTL_S = float(os.environ.get("MESHLINK_ZONE_ENTRY_TTL_S", "180"))
 
 # Phase 5 — meshlink-backend integration. The backend is only ever touched
 # off the message path: one organiser-key fetch at boot plus the 60 s
-# heartbeat. Mesh messages never leave the venue network.
+# heartbeat, and (backend-via-node) proxied app requests. Mesh messages never
+# leave the venue network.
 BACKEND_BASE_URL = os.environ.get("MESHLINK_BACKEND_URL", "http://127.0.0.1:8000")
+
+# Which uplink carries that backend traffic. macOS dev nodes sit on a regular
+# WiFi LAN and reach BACKEND_BASE_URL directly; a deployed Pi's only IP
+# network is the batman-adv mesh (bat0), so the backend is reached at its
+# mesh address — the machine hosting (or NATing to) it, joined to the mesh.
+# "auto" picks by platform; MESHLINK_BACKEND_CHANNEL=wifi_lan|batman forces.
+BACKEND_CHANNEL = os.environ.get("MESHLINK_BACKEND_CHANNEL", "auto").lower()
+if BACKEND_CHANNEL == "auto":
+    BACKEND_CHANNEL = "wifi_lan" if sys.platform == "darwin" else "batman"
+
+# Backend address on the batman-adv mesh. Convention: zone nodes take
+# 10.77.0.<zone> (scripts/setup_batman.sh), the backend host takes .254.
+BACKEND_BATMAN_URL = os.environ.get(
+    "MESHLINK_BACKEND_BATMAN_URL", "http://10.77.0.254:8000"
+)
+
+# The effective URL every node→backend caller uses (organiser key fetch,
+# heartbeat, directory sync, phone backend-proxy).
+BACKEND_URL = BACKEND_BATMAN_URL if BACKEND_CHANNEL == "batman" else BACKEND_BASE_URL
 
 # Event this node is deployed for; attestation tokens for any other eid are
 # rejected at pipeline step 7. Must match the event_id the app purchases

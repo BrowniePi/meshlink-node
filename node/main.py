@@ -36,6 +36,7 @@ def main() -> None:
     # and unit tests never need the platform Bluetooth stack present.
     from node import config
     from node.attestation.organiser_key import load_organiser_pubkey
+    from node.backend_proxy import BackendProxyService
     from node.backhaul.batman_backhaul import BatmanBackhaul
     from node.backhaul.dynamic_zone_table import DynamicZoneTable
     from node.backhaul.radio_config import check_backhaul_radio
@@ -56,13 +57,16 @@ def main() -> None:
 
     # Phase 5: attestation enforcement. One backend call per boot (or none,
     # with the env override); every token verification afterwards is offline.
+    # All backend traffic rides the platform's uplink channel: the macOS WiFi
+    # LAN, or the backend's batman-adv mesh address on a Pi (config.BACKEND_URL).
+    log.info("backend via %s channel: %s", config.BACKEND_CHANNEL, config.BACKEND_URL)
     if config.ORGANISER_PUBKEY:
         organiser_pubkey = config.ORGANISER_PUBKEY
         log.info("organiser public key from MESHLINK_ORGANISER_PUBKEY: %s",
                  organiser_pubkey)
     else:
         organiser_pubkey = load_organiser_pubkey(
-            config.BACKEND_BASE_URL, config.ORGANISER_KEY_CACHE
+            config.BACKEND_URL, config.ORGANISER_KEY_CACHE
         )
     attestation = AttestationCache(bytes.fromhex(organiser_pubkey), config.EVENT_ID)
     log.info("attestation enforcement on — event_id=%s", config.EVENT_ID)
@@ -121,7 +125,7 @@ def main() -> None:
     # directory cache is the node's offline copy of {username, pubkeys};
     # the store holds one (latest) coordinate per identity, nothing more.
     directory = DirectoryCache(
-        base_url=config.BACKEND_BASE_URL,
+        base_url=config.BACKEND_URL,
         cache_path=config.DIRECTORY_CACHE,
         event_id=config.EVENT_ID,
         refresh_interval_s=config.HEARTBEAT_INTERVAL_S,
@@ -138,6 +142,12 @@ def main() -> None:
         node_identity=load_or_create_identity(config.NODE_IDENTITY_PATH),
         zone_id=config.NODE_ZONE_ID,
     )
+    # Backend-via-node: answers the app's MLBP1 proxy frames over the same
+    # uplink the heartbeat uses.
+    backend_proxy = BackendProxyService(
+        transport=transport,
+        base_url=config.BACKEND_URL,
+    )
     relay = NodeRelay(
         transport=transport,
         backhaul=backhaul,
@@ -145,13 +155,14 @@ def main() -> None:
         attestation=attestation,
         phone_ping=phone_ping,
         location=location,
+        backend_proxy=backend_proxy,
     )
 
     heartbeat = HeartbeatSender(
         node_id=config.NODE_ID,
         zone_id=config.NODE_ZONE_ID,
         zone_name=config.NODE_ZONE_NAME,
-        base_url=config.BACKEND_BASE_URL,
+        base_url=config.BACKEND_URL,
         transport=transport,
         backhaul=backhaul,
         relay=relay,
@@ -172,6 +183,7 @@ def main() -> None:
         log.info("shutting down")
     finally:
         heartbeat.stop()
+        backend_proxy.stop()
         directory.stop()
         phone_ping.stop()
         relay.stop()
