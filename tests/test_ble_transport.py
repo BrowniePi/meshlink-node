@@ -18,6 +18,7 @@ class FakeGattServer:
 
     def __init__(self):
         self.on_packet = None
+        self.on_connect = None
         self.on_disconnect = None
         self.running = False
         self.sent: list[tuple[str, bytes]] = []
@@ -40,6 +41,8 @@ class FakeGattServer:
 
     def connect(self, peer_id):
         self._peers.append(peer_id)
+        if self.on_connect is not None:
+            self.on_connect(peer_id)
 
     def receive(self, peer_id, packet):
         self.on_packet(peer_id, packet)
@@ -65,6 +68,16 @@ def test_start_stop_and_peer_listing():
     assert transport.list_peers() == ["dev_AA", "dev_BB"]
     transport.stop()
     assert not server.running
+
+
+def test_on_connect_callback_fires_per_new_central():
+    server = FakeGattServer()
+    transport = BleTransport(server)
+    connected = []
+    transport.on_connect(connected.append)
+    server.connect("dev_AA")
+    server.connect("dev_BB")
+    assert connected == ["dev_AA", "dev_BB"]
 
 
 def test_send_failure_is_contained():

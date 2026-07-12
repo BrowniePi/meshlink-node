@@ -19,7 +19,9 @@ class BleTransport(Transport):
         the same start/stop/send_packet/peers/on_packet/on_disconnect surface)."""
         self._server = server
         self._callback: Optional[Callable[[str, bytes], None]] = None
+        self._connect_callback: Optional[Callable[[str], None]] = None
         server.on_packet = self._handle_packet
+        server.on_connect = self._handle_connect
         server.on_disconnect = self._handle_disconnect
 
     def start(self) -> None:
@@ -37,6 +39,16 @@ class BleTransport(Transport):
 
     def on_receive(self, callback: Callable[[str, bytes], None]) -> None:
         self._callback = callback
+
+    def on_connect(self, callback: Callable[[str], None]) -> None:
+        """Register a callback invoked as callback(peer_id) on each new connect.
+
+        Not part of the shared Transport contract (vendor/meshlink-core) —
+        an extra, opt-in hook only BLE/WiFi/MultiTransport implement, for
+        callers (phone_ping) that want to act the moment a phone connects
+        rather than waiting for the next list_peers() poll.
+        """
+        self._connect_callback = callback
 
     def list_peers(self) -> list[str]:
         return self._server.peers()
@@ -57,6 +69,14 @@ class BleTransport(Transport):
         except Exception:
             # Malformed data must not crash the GLib main loop.
             log.exception("receive callback failed for packet from %s", peer_id)
+
+    def _handle_connect(self, peer_id: str) -> None:
+        if self._connect_callback is None:
+            return
+        try:
+            self._connect_callback(peer_id)
+        except Exception:
+            log.exception("connect callback failed for %s", peer_id)
 
     def _handle_disconnect(self, peer_id: str) -> None:
         log.info("peer %s disconnected", peer_id)

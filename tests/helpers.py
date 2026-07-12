@@ -25,6 +25,7 @@ class FakeTransport(Transport):
         self.sent: list[tuple[str, bytes]] = []
         self.started = False
         self._callback = None
+        self._connect_callback = None
 
     def start(self) -> None:
         self.started = True
@@ -38,9 +39,18 @@ class FakeTransport(Transport):
     def on_receive(self, callback) -> None:
         self._callback = callback
 
+    def on_connect(self, callback) -> None:
+        self._connect_callback = callback
+
     def list_peers(self) -> list[str]:
         return list(self.peers)
 
     def deliver(self, peer_id: str, data: bytes) -> None:
         """Simulate an inbound packet from peer_id."""
         self._callback(peer_id, data)
+
+    def connect(self, peer_id: str) -> None:
+        """Simulate a new peer connecting."""
+        self.peers.append(peer_id)
+        if self._connect_callback is not None:
+            self._connect_callback(peer_id)

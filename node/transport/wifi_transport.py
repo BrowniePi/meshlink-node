@@ -31,6 +31,7 @@ class WifiTransport(Transport):
         self._port = port
         self._server: Optional[socket.socket] = None
         self._callback: Optional[Callable[[str, bytes], None]] = None
+        self._connect_callback: Optional[Callable[[str], None]] = None
         self._running = False
         # peer_id -> live connection; guarded by _lock (accept/reader threads
         # add/remove, the relay's GLib thread iterates via list_peers/send).
@@ -88,6 +89,10 @@ class WifiTransport(Transport):
     def on_receive(self, callback: Callable[[str, bytes], None]) -> None:
         self._callback = callback
 
+    def on_connect(self, callback: Callable[[str], None]) -> None:
+        """See BleTransport.on_connect — same opt-in, non-Transport-contract hook."""
+        self._connect_callback = callback
+
     def list_peers(self) -> list[str]:
         with self._lock:
             return list(self._conns)
@@ -113,6 +118,11 @@ class WifiTransport(Transport):
             with self._lock:
                 self._conns[peer_id] = conn
             log.info("phone connected: %s", peer_id)
+            if self._connect_callback is not None:
+                try:
+                    self._connect_callback(peer_id)
+                except Exception:
+                    log.exception("connect callback failed for %s", peer_id)
             threading.Thread(target=self._reader, args=(peer_id, conn),
                              daemon=True, name=f"wifi-{peer_id}").start()
 

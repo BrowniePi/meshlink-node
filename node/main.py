@@ -115,12 +115,19 @@ def main() -> None:
         own_addr=config.BACKHAUL_ADVERTISE_ADDR,
         interval_s=config.HEARTBEAT_INTERVAL_S,
     )
-    # Phase 7: ask each connected phone for location + battery every 2 min;
+    # Phase 7: ask each connected phone for location + battery every 90 s;
     # the latest answers ride the heartbeat as phone_telemetry.
     phone_ping = PhonePingService(
         transport=transport,
         interval_s=config.PHONE_PING_INTERVAL_S,
+        connect_delay_s=config.PHONE_PING_CONNECT_DELAY_S,
+        node_name=config.NODE_NAME,
+        node_lat=config.NODE_LAT,
+        node_lon=config.NODE_LON,
     )
+    # Ping a phone shortly after it connects, rather than waiting up to
+    # PHONE_PING_INTERVAL_S for the next sweep.
+    transport.on_connect(phone_ping.on_peer_connected)
     # Phase 5 friendship extension: capability-gated location serving. The
     # directory cache is the node's offline copy of {username, pubkeys};
     # the store holds one (latest) coordinate per identity, nothing more.

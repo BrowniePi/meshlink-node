@@ -1,4 +1,5 @@
 """Node configuration."""
+import json
 import os
 import socket
 import sys
@@ -139,7 +140,40 @@ LOCATION_QUERY_MIN_INTERVAL_S = float(
 # Phase 7 phone telemetry ping (node/monitoring/phone_ping.py): how often
 # each connected phone is asked for its location and battery. Reports age
 # out after 3 missed pings and ride the heartbeat's phone_telemetry block.
-PHONE_PING_INTERVAL_S = float(os.environ.get("MESHLINK_PHONE_PING_INTERVAL_S", "120"))
+PHONE_PING_INTERVAL_S = float(os.environ.get("MESHLINK_PHONE_PING_INTERVAL_S", "90"))
+
+# Grace period between a phone connecting and its first ping: the app needs
+# a moment after the link comes up before it can answer, so firing the ping
+# the instant the transport reports the peer would just waste it.
+PHONE_PING_CONNECT_DELAY_S = float(
+    os.environ.get("MESHLINK_PHONE_PING_CONNECT_DELAY_S", "3")
+)
+
+# Node identity/location carried on every phone ping, so the app can label
+# "who is this node and where is it" without a separate lookup. Lives in its
+# own small JSON file (not env vars) so an operator can hand-edit it on the
+# device — auto-created with placeholder values on first boot, same pattern
+# as NODE_IDENTITY_PATH. lat/lon are the node's own fixed position (a phone
+# app or map lookup, entered once per deployment), not a GPS reading.
+NODE_INFO_PATH = Path(
+    os.environ.get("MESHLINK_NODE_INFO",
+                    Path(__file__).resolve().parent.parent / "node_info.json")
+)
+
+
+def _load_node_info(path: Path) -> dict:
+    if not path.exists():
+        path.write_text(json.dumps(
+            {"node_name": "MeshLink Node", "lat": None, "lon": None}, indent=2,
+        ) + "\n")
+    with path.open() as f:
+        return json.load(f)
+
+
+_node_info = _load_node_info(NODE_INFO_PATH)
+NODE_NAME = _node_info.get("node_name") or "MeshLink Node"
+NODE_LAT = _node_info.get("lat")
+NODE_LON = _node_info.get("lon")
 
 # Phase 6 — phone-facing WiFi listener (node/transport/wifi_transport.py).
 # Default binds the hostapd AP address (scripts/setup_hostapd.sh); dev

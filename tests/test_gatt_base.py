@@ -57,6 +57,18 @@ def test_corrupt_stream_is_dropped_without_raising():
     assert received == [b"ok"]
 
 
+def test_connect_fires_callback_once_per_new_peer():
+    server = RecordingServer()
+    arrived = []
+    server.on_connect = arrived.append
+
+    server._peer_connected("peer_A")
+    server._peer_connected("peer_A")  # e.g. a duplicate connect event
+    server._peer_connected("peer_B")
+
+    assert arrived == ["peer_A", "peer_B"]
+
+
 def test_disconnect_clears_peer_state_and_fires_callback():
     server = RecordingServer()
     gone = []
