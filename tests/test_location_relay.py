@@ -1,12 +1,14 @@
 """End-to-end through NodeRelay: location traffic passes the full 8-step
-pipeline like any signed message, then gets node-terminated — beacons and
-queries are never fanned out to other phones."""
+pipeline like any signed message. Beacons are node-terminated — a raw
+coordinate is never fanned out. Queries are answered from the cache AND
+sprayed onward toward the target phone (hybrid: the phone's live fix
+outranks the node's cached one)."""
 import json
 
 import pytest
 
 import node.core  # noqa: F401 — puts the vendored core on sys.path
-from capability.token import issue
+from capability.token import issue, pubkey_id
 from crypto.sealed import generate_encryption_keypair
 from identity import build_signed_packet, generate_keypair
 from location.wire import (
@@ -93,16 +95,18 @@ def test_happy_path_query_served_encrypted_to_requester(rig):
 
     transport.deliver("phone-requester", query_packet(token))
 
-    # exactly one send: the response, straight back to the requester's session
-    assert len(transport.sent) == 1
-    peer, raw = transport.sent[0]
-    assert peer == "phone-requester"
-    msg = parse_packet(raw)
-    assert msg.msg_type == MessageType.LOCATION_RESPONSE
-    payload = decode_location_response(msg.payload, REQ_CURVE_PRIV)
+    # the cached answer goes straight back over the requester's session…
+    responses = [(p, parse_packet(raw)) for p, raw in transport.sent
+                 if parse_packet(raw).msg_type == MessageType.LOCATION_RESPONSE]
+    assert [p for p, _ in responses] == ["phone-requester"]
+    payload = decode_location_response(responses[0][1].payload, REQ_CURVE_PRIV)
+    assert payload.target_pubkey_id == pubkey_id(TARGET.public_key)
     assert (payload.lat_microdeg, payload.lon_microdeg) == (51503298, -127144)
-    # the query itself was never relayed to the target or anyone else
-    assert not any(p in ("phone-target", "phone-other") for p, _ in transport.sent)
+    # …and the query still sprays toward the target phone (hybrid), never
+    # back to the requester's own session
+    queries = [p for p, raw in transport.sent
+               if parse_packet(raw).msg_type == MessageType.LOCATION_QUERY]
+    assert set(queries) == {"phone-target", "phone-other"}
 
 
 def test_query_without_valid_token_gets_nothing(rig):
@@ -113,7 +117,10 @@ def test_query_without_valid_token_gets_nothing(rig):
 
     transport.deliver("phone-requester", query_packet(forged))
 
-    assert transport.sent == []  # silent, uniform refusal
+    # silent, uniform refusal: no response — though the (useless-to-anyone
+    # but its grantee) query still sprays onward like any mesh packet
+    assert not any(parse_packet(raw).msg_type == MessageType.LOCATION_RESPONSE
+                   for _, raw in transport.sent)
 
 
 def test_direct_message_relays_opaque_and_is_not_node_terminated(rig):
@@ -156,7 +163,8 @@ def test_revoke_feeds_set_and_still_relays_to_phones(rig):
     fanned_to = {p for p, _ in transport.sent}
     assert fanned_to == {"phone-requester", "phone-other"}
 
-    # and future serving is refused
+    # and future serving is refused (the query still relays onward)
     transport.sent.clear()
     transport.deliver("phone-requester", query_packet(token))
-    assert transport.sent == []
+    assert not any(parse_packet(raw).msg_type == MessageType.LOCATION_RESPONSE
+                   for _, raw in transport.sent)
