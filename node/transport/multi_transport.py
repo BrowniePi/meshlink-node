@@ -35,5 +35,10 @@ class MultiTransport(Transport):
         self._ble.on_receive(callback)
         self._wifi.on_receive(callback)
 
+    def on_connect(self, callback: Callable[[str], None]) -> None:
+        """See BleTransport.on_connect — forwarded to both children."""
+        self._ble.on_connect(callback)
+        self._wifi.on_connect(callback)
+
     def list_peers(self) -> list[str]:
         return self._ble.list_peers() + self._wifi.list_peers()

@@ -107,6 +107,29 @@ Optional knobs:
 | `MESHLINK_DIRECTORY_CACHE` | `directory_cache.json` | On-disk user directory cache, refreshed from `GET /directory/sync` at heartbeat cadence |
 | `MESHLINK_LOCATION_QUERY_MIN_INTERVAL_S` | `60` | Per-(requester, target) query rate limit |
 
+### Backend via node (phone proxy + uplink channel)
+
+Phones at the venue usually have no internet (the mesh AP is a closed
+network), so the node proxies the app's backend HTTP flows: the app sends an
+`MLBP1`-prefixed request frame over BLE/WiFi (same demux pattern as the
+`MLPP1` telemetry ping), `node/backend_proxy.py` executes it against the
+backend over the node's own uplink and answers on the same transport. Only
+the app-facing API is forwarded (`/auth/*`, `/tickets*`, `/attestation/*`,
+`/events`, `/account`, `/directory/*`, `/friendships*`, `/health`) — never
+the operator surface.
+
+Which uplink carries backend traffic (this proxy *and* the node's own
+organiser-key fetch, heartbeat, and directory sync) is the channel:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MESHLINK_BACKEND_CHANNEL` | `auto` | `wifi_lan` (backend over the regular LAN, `MESHLINK_BACKEND_URL`) or `batman` (backend at its bat0 mesh address). `auto` = `wifi_lan` on macOS, `batman` elsewhere (Pi). |
+| `MESHLINK_BACKEND_BATMAN_URL` | `http://10.77.0.254:8000` | Backend URL on the batman-adv mesh — the machine hosting (or NATing to) it, joined to the mesh at `.254` by convention (zone nodes take `10.77.0.<zone>`). |
+
+So a macOS dev node keeps talking to the backend over the WiFi LAN exactly as
+before, while a deployed Pi reaches it over batman-adv without any internet
+uplink of its own.
+
 ### Phone-facing WiFi AP (Phase 6)
 
 Since Phase 6, phones can reach the node over **WiFi** as well as BLE. Two

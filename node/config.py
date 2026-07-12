@@ -1,6 +1,8 @@
 """Node configuration."""
+import json
 import os
 import socket
+import sys
 from pathlib import Path
 
 # The zone this node serves. Each node is deployed with a distinct zone via
@@ -74,8 +76,28 @@ ZONE_ENTRY_TTL_S = float(os.environ.get("MESHLINK_ZONE_ENTRY_TTL_S", "180"))
 
 # Phase 5 — meshlink-backend integration. The backend is only ever touched
 # off the message path: one organiser-key fetch at boot plus the 60 s
-# heartbeat. Mesh messages never leave the venue network.
+# heartbeat, and (backend-via-node) proxied app requests. Mesh messages never
+# leave the venue network.
 BACKEND_BASE_URL = os.environ.get("MESHLINK_BACKEND_URL", "http://127.0.0.1:8000")
+
+# Which uplink carries that backend traffic. macOS dev nodes sit on a regular
+# WiFi LAN and reach BACKEND_BASE_URL directly; a deployed Pi's only IP
+# network is the batman-adv mesh (bat0), so the backend is reached at its
+# mesh address — the machine hosting (or NATing to) it, joined to the mesh.
+# "auto" picks by platform; MESHLINK_BACKEND_CHANNEL=wifi_lan|batman forces.
+BACKEND_CHANNEL = os.environ.get("MESHLINK_BACKEND_CHANNEL", "auto").lower()
+if BACKEND_CHANNEL == "auto":
+    BACKEND_CHANNEL = "wifi_lan" if sys.platform == "darwin" else "batman"
+
+# Backend address on the batman-adv mesh. Convention: zone nodes take
+# 10.77.0.<zone> (scripts/setup_batman.sh), the backend host takes .254.
+BACKEND_BATMAN_URL = os.environ.get(
+    "MESHLINK_BACKEND_BATMAN_URL", "http://10.77.0.254:8000"
+)
+
+# The effective URL every node→backend caller uses (organiser key fetch,
+# heartbeat, directory sync, phone backend-proxy).
+BACKEND_URL = BACKEND_BATMAN_URL if BACKEND_CHANNEL == "batman" else BACKEND_BASE_URL
 
 # Event this node is deployed for; attestation tokens for any other eid are
 # rejected at pipeline step 7. Must match the event_id the app purchases
@@ -118,7 +140,40 @@ LOCATION_QUERY_MIN_INTERVAL_S = float(
 # Phase 7 phone telemetry ping (node/monitoring/phone_ping.py): how often
 # each connected phone is asked for its location and battery. Reports age
 # out after 3 missed pings and ride the heartbeat's phone_telemetry block.
-PHONE_PING_INTERVAL_S = float(os.environ.get("MESHLINK_PHONE_PING_INTERVAL_S", "120"))
+PHONE_PING_INTERVAL_S = float(os.environ.get("MESHLINK_PHONE_PING_INTERVAL_S", "90"))
+
+# Grace period between a phone connecting and its first ping: the app needs
+# a moment after the link comes up before it can answer, so firing the ping
+# the instant the transport reports the peer would just waste it.
+PHONE_PING_CONNECT_DELAY_S = float(
+    os.environ.get("MESHLINK_PHONE_PING_CONNECT_DELAY_S", "3")
+)
+
+# Node identity/location carried on every phone ping, so the app can label
+# "who is this node and where is it" without a separate lookup. Lives in its
+# own small JSON file (not env vars) so an operator can hand-edit it on the
+# device — auto-created with placeholder values on first boot, same pattern
+# as NODE_IDENTITY_PATH. lat/lon are the node's own fixed position (a phone
+# app or map lookup, entered once per deployment), not a GPS reading.
+NODE_INFO_PATH = Path(
+    os.environ.get("MESHLINK_NODE_INFO",
+                    Path(__file__).resolve().parent.parent / "node_info.json")
+)
+
+
+def _load_node_info(path: Path) -> dict:
+    if not path.exists():
+        path.write_text(json.dumps(
+            {"node_name": "MeshLink Node", "lat": None, "lon": None}, indent=2,
+        ) + "\n")
+    with path.open() as f:
+        return json.load(f)
+
+
+_node_info = _load_node_info(NODE_INFO_PATH)
+NODE_NAME = _node_info.get("node_name") or "MeshLink Node"
+NODE_LAT = _node_info.get("lat")
+NODE_LON = _node_info.get("lon")
 
 # Phase 6 — phone-facing WiFi listener (node/transport/wifi_transport.py).
 # Default binds the hostapd AP address (scripts/setup_hostapd.sh); dev

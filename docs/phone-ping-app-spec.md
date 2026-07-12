@@ -55,11 +55,17 @@ Both frames are `MLPP1` + a compact JSON object (UTF-8, no whitespace).
 ### Ping (node → phone) — the app receives this
 
 ```
-MLPP1{"t":"ping"}
+MLPP1{"t":"ping","node_name":"Main Stage Node","node_lat":51.5074,"node_lon":-0.1278}
 ```
 
-No payload beyond the type; its arrival **is** the request. Treat any unknown
-extra keys leniently (the node may add fields within this version).
+Its arrival **is** the request; `node_name`/`node_lat`/`node_lon` describe the
+node sending it, not the phone. `node_name` is an operator-set label
+(`node/config.py NODE_INFO_PATH`, default `"MeshLink Node"`); `node_lat`/
+`node_lon` are the node's own fixed position, set once per deployment (not a
+live GPS reading) — both are **omitted entirely** from the frame if the
+operator hasn't configured a location. Treat any unknown extra keys leniently
+(the node may add fields within this version), and don't assume these three
+keys are always present.
 
 ### Pong (phone → node) — the app sends this
 
@@ -137,7 +143,8 @@ is in flight, it's fine to coalesce (answer once).
 | Constant | Value | Source |
 |---|---|---|
 | Magic prefix | `MLPP1` (5 bytes) | `PHONE_PING_MAGIC` |
-| Ping interval | 120 s (node-driven; configurable via `MESHLINK_PHONE_PING_INTERVAL_S`) | node config |
+| Ping interval | 90 s (node-driven; configurable via `MESHLINK_PHONE_PING_INTERVAL_S`) | node config |
+| Connect ping | An extra ping fires 3 s after a phone connects (BLE or WiFi), on top of the periodic sweep — so the first report isn't delayed up to a full interval, but the app still gets a moment to settle after the link comes up. Configurable via `MESHLINK_PHONE_PING_CONNECT_DELAY_S`. | `node/monitoring/phone_ping.py PhonePingService.on_peer_connected`, wired via `transport.on_connect` in `node/main.py` |
 | Report TTL (node) | 3 × interval | node |
 | Max frame | 460 bytes | `node/ble/framing.py` `MAX_FRAME` |
 

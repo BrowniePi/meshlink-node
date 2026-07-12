@@ -25,6 +25,7 @@ class GattServerBase(ABC):
 
     Callbacks:
       on_packet(peer_id, packet)   — complete reassembled inbound packet
+      on_connect(peer_id)          — a new central connected
       on_disconnect(peer_id)       — a tracked central disconnected
 
     peer_id is an opaque per-central string; its format is backend-specific
@@ -35,6 +36,7 @@ class GattServerBase(ABC):
         self._assemblers: dict[str, FrameAssembler] = {}
         self._connected: set[str] = set()
         self.on_packet: Optional[Callable[[str, bytes], None]] = None
+        self.on_connect: Optional[Callable[[str], None]] = None
         self.on_disconnect: Optional[Callable[[str], None]] = None
 
     # -- backend plumbing ------------------------------------------------------
@@ -71,8 +73,11 @@ class GattServerBase(ABC):
                 self.on_packet(peer_id, packet)
 
     def _peer_connected(self, peer_id: str) -> None:
+        is_new = peer_id not in self._connected
         self._connected.add(peer_id)
         log.info("central connected: %s", peer_id)
+        if is_new and self.on_connect is not None:
+            self.on_connect(peer_id)
 
     def _peer_disconnected(self, peer_id: str) -> None:
         self._connected.discard(peer_id)

@@ -1,10 +1,12 @@
-"""Phone telemetry ping: node → phone every 2 minutes, phone answers back.
+"""Phone telemetry ping: node → phone every 90 seconds, phone answers back.
 
 The node half of the Phase 7 telemetry loop (app half:
 meshlink-app docs/phone-ping-app-spec.md). Every interval the node sends
-``MLPP1{"t":"ping"}`` to each connected phone over the transport it is
-already connected on; the phone answers with its location and battery:
-``MLPP1{"t":"pong","lat":…,"lon":…,"battery":…,"charging":…}``.
+``MLPP1{"t":"ping","node_name":…,"node_lat":…,"node_lon":…}`` to each
+connected phone over the transport it is already connected on (node_name/
+node_lat/node_lon are omitted when unconfigured, see
+``node/config.py NODE_INFO_PATH``); the phone answers with its location and
+battery: ``MLPP1{"t":"pong","lat":…,"lon":…,"battery":…,"charging":…}``.
 
 The node keeps only the latest report per phone, ages it out after 3 missed
 pings, and folds the survivors into the heartbeat's ``phone_telemetry``
@@ -27,8 +29,19 @@ PHONE_PING_MAGIC = b"MLPP1"
 _COMPACT = {"separators": (",", ":")}
 
 
-def encode_ping() -> bytes:
-    return PHONE_PING_MAGIC + json.dumps({"t": "ping"}, **_COMPACT).encode()
+def encode_ping(
+    node_name: Optional[str] = None,
+    node_lat: Optional[float] = None,
+    node_lon: Optional[float] = None,
+) -> bytes:
+    body = {"t": "ping"}
+    if node_name is not None:
+        body["node_name"] = node_name
+    if node_lat is not None:
+        body["node_lat"] = node_lat
+    if node_lon is not None:
+        body["node_lon"] = node_lon
+    return PHONE_PING_MAGIC + json.dumps(body, **_COMPACT).encode()
 
 
 def encode_pong(
@@ -82,6 +95,10 @@ def _as_int(value) -> Optional[int]:
 class PhonePingService:
     """Pings every connected phone each interval and collects the answers.
 
+    A phone gets its first ping connect_delay_s after it connects (see
+    on_peer_connected), then rides the periodic interval_s sweep like every
+    other peer.
+
     Reports live for 3 × interval (3 missed pings) and then age out, so a
     phone that disconnects or stops answering disappears from the heartbeat
     on its own. [clock] is injectable for deterministic aging tests.
@@ -90,16 +107,25 @@ class PhonePingService:
     def __init__(
         self,
         transport: Transport,
-        interval_s: float = 120.0,
+        interval_s: float = 90.0,
+        connect_delay_s: float = 3.0,
         clock: Callable[[], float] = time.monotonic,
+        node_name: Optional[str] = None,
+        node_lat: Optional[float] = None,
+        node_lon: Optional[float] = None,
     ):
         self._transport = transport
         self._interval_s = interval_s
+        self._connect_delay_s = connect_delay_s
         self._clock = clock
+        self._node_name = node_name
+        self._node_lat = node_lat
+        self._node_lon = node_lon
         self._reports: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._connect_timers: set[threading.Timer] = set()
 
     @property
     def report_ttl_s(self) -> float:
@@ -110,13 +136,43 @@ class PhonePingService:
             target=self._loop, name="phone-ping", daemon=True,
         )
         self._thread.start()
-        log.info("phone ping every %.0f s (reports live %.0f s)",
-                 self._interval_s, self.report_ttl_s)
+        log.info("phone ping every %.0f s, first %.0f s after connect "
+                 "(reports live %.0f s)",
+                 self._interval_s, self._connect_delay_s, self.report_ttl_s)
 
     def stop(self) -> None:
         self._stop.set()
+        with self._lock:
+            timers, self._connect_timers = self._connect_timers, set()
+        for timer in timers:
+            timer.cancel()
         if self._thread is not None:
             self._thread.join(timeout=2)
+
+    def on_peer_connected(self, peer_id: str) -> None:
+        """Transport on_connect callback: first ping connect_delay_s later.
+
+        The phone needs a moment after the transport reports the link up
+        before it can answer, so the first ping waits rather than firing
+        into a peer that will drop it. The periodic sweep is unaffected —
+        it keeps its own interval_s cadence.
+        """
+        timer = threading.Timer(
+            self._connect_delay_s, self._fire_connect_ping, args=(peer_id,),
+        )
+        timer.name = f"phone-ping-connect-{peer_id}"
+        timer.daemon = True
+        with self._lock:
+            # Timers are tracked only so stop() can cancel the pending ones;
+            # drop the spent ones here so a long-lived node doesn't hoard them.
+            self._connect_timers = {t for t in self._connect_timers if t.is_alive()}
+            self._connect_timers.add(timer)
+        timer.start()
+
+    def _fire_connect_ping(self, peer_id: str) -> None:
+        if self._stop.is_set():
+            return
+        self.ping_peer(peer_id)
 
     def _loop(self) -> None:
         while not self._stop.wait(self._interval_s):
@@ -124,13 +180,17 @@ class PhonePingService:
 
     def ping_all(self) -> None:
         """Send one ping to every connected phone; failures never raise."""
-        ping = encode_ping()
         for peer in self._transport.list_peers():
-            try:
-                self._transport.send(peer, ping)
-            except Exception:
-                # A peer vanishing mid-ping must never take down the loop.
-                log.warning("ping to %s failed", peer, exc_info=True)
+            self.ping_peer(peer)
+
+    def ping_peer(self, peer_id: str) -> None:
+        """Send one ping to a single phone; failures never raise."""
+        ping = encode_ping(self._node_name, self._node_lat, self._node_lon)
+        try:
+            self._transport.send(peer_id, ping)
+        except Exception:
+            # A peer vanishing mid-ping must never take down the loop.
+            log.warning("ping to %s failed", peer_id, exc_info=True)
 
     def handle_frame(self, peer_id: str, frame: bytes) -> None:
         """Consume one demuxed telemetry frame (relay hands these over).

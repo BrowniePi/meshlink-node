@@ -1,6 +1,7 @@
 """Phone telemetry ping: wire codec, report lifecycle, relay demux,
 heartbeat integration."""
 import json
+import time
 
 from node.monitoring.phone_ping import (
     PHONE_PING_MAGIC,
@@ -34,6 +35,14 @@ def make_service(peers=("phoneA", "phoneB"), interval_s=120.0):
 
 def test_encode_ping_matches_wire_contract():
     assert encode_ping() == b'MLPP1{"t":"ping"}'
+
+
+def test_encode_ping_carries_node_name_and_location_when_configured():
+    ping = encode_ping(node_name="Main Stage Node", node_lat=51.5074, node_lon=-0.1278)
+    assert ping == (
+        b'MLPP1{"t":"ping","node_name":"Main Stage Node",'
+        b'"node_lat":51.5074,"node_lon":-0.1278}'
+    )
 
 
 def test_encode_pong_matches_spec_example():
@@ -73,6 +82,53 @@ def test_ping_all_sends_one_ping_to_every_connected_phone():
         ("phoneB", encode_ping()),
         ("phoneC", encode_ping()),
     ]
+
+
+def test_ping_all_carries_configured_node_name_and_location():
+    clock = FakeClock()
+    transport = FakeTransport(["phoneA"])
+    service = PhonePingService(
+        transport, clock=clock,
+        node_name="Main Stage Node", node_lat=51.5074, node_lon=-0.1278,
+    )
+    service.ping_all()
+    assert transport.sent == [
+        ("phoneA", encode_ping("Main Stage Node", 51.5074, -0.1278)),
+    ]
+
+
+def test_ping_peer_sends_immediately_to_one_phone():
+    service, transport, _ = make_service(["phoneA"])
+    service.ping_peer("phoneA")
+    assert transport.sent == [("phoneA", encode_ping())]
+
+
+def test_transport_on_connect_pings_after_the_connect_delay():
+    clock = FakeClock()
+    transport = FakeTransport([])
+    service = PhonePingService(transport, connect_delay_s=0.05, clock=clock)
+    transport.on_connect(service.on_peer_connected)
+
+    transport.connect("phoneA")
+    assert transport.sent == []  # the phone gets its grace period first
+
+    deadline = time.monotonic() + 2
+    while not transport.sent and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert transport.sent == [("phoneA", encode_ping())]
+
+
+def test_stop_cancels_a_pending_connect_ping():
+    clock = FakeClock()
+    transport = FakeTransport([])
+    service = PhonePingService(transport, connect_delay_s=5, clock=clock)
+    transport.on_connect(service.on_peer_connected)
+
+    transport.connect("phoneA")
+    service.stop()
+    time.sleep(0.05)
+
+    assert transport.sent == []
 
 
 def test_ping_all_survives_a_send_failure():

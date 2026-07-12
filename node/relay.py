@@ -9,6 +9,7 @@ import threading
 import time
 
 from node.attestation import MSG_TYPE_ATTESTATION_PRESENT
+from node.backend_proxy import BackendProxyService, is_backend_proxy_frame
 from node.backhaul.base import NodeBackhaul
 from node.core import AttestationCache, Outcome, RelayPipeline, Transport, parse_packet
 from node.location.service import LocationService
@@ -79,6 +80,7 @@ class NodeRelay:
         attestation: AttestationCache | None = None,
         phone_ping: PhonePingService | None = None,
         location: LocationService | None = None,
+        backend_proxy: BackendProxyService | None = None,
     ):
         self._transport = transport
         self._backhaul = backhaul
@@ -86,6 +88,7 @@ class NodeRelay:
         self._attestation = attestation
         self._phone_ping = phone_ping
         self._location = location
+        self._backend_proxy = backend_proxy
         self._pipeline = RelayPipeline(attestation=attestation)
         # Traffic counters since boot, reported in heartbeats. Guarded by a
         # lock because BLE and backhaul receives arrive on different threads.
@@ -133,6 +136,14 @@ class NodeRelay:
         if is_telemetry_frame(raw):
             if self._phone_ping is not None:
                 self._phone_ping.handle_frame(peer_id, raw)
+            return
+
+        # Backend-via-node demux: MLBP1 request frames are phone↔node control
+        # traffic like the telemetry ping — never mesh packets, never relayed.
+        # The service answers on a worker thread over the same transport.
+        if is_backend_proxy_frame(raw):
+            if self._backend_proxy is not None:
+                self._backend_proxy.handle_frame(peer_id, raw)
             return
 
         log.info(
