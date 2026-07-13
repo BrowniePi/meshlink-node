@@ -57,7 +57,7 @@ def test_encode_response_success_and_error():
 
 
 def test_is_backend_proxy_frame_matches_only_the_magic():
-    assert is_backend_proxy_frame(encode_request("1", "GET", "/events"))
+    assert is_backend_proxy_frame(encode_request("1", "GET", "/rest/v1/events"))
     assert not is_backend_proxy_frame(b'MLPP1{"t":"ping"}')
     assert not is_backend_proxy_frame(b"\x8f" * 32)
 
@@ -71,9 +71,11 @@ def test_decode_rejects_non_json_and_missing_t():
 # -- allowlist -----------------------------------------------------------------
 
 @pytest.mark.parametrize("path", [
-    "/auth/login", "/tickets", "/tickets/tk-1/validity?event_id=e",
-    "/attestation/token", "/events", "/account", "/directory/sync",
-    "/friendships", "/health",
+    "/auth/v1/signup", "/auth/v1/token?grant_type=password",
+    "/rest/v1/rpc/send_message", "/rest/v1/relay_messages",
+    "/rest/v1/directory?username=eq.ada", "/rest/v1/events",
+    "/functions/v1/tickets", "/functions/v1/attestation-token",
+    "/health",
 ])
 def test_app_facing_paths_allowed(path):
     assert path_allowed(path)
@@ -81,7 +83,8 @@ def test_app_facing_paths_allowed(path):
 
 @pytest.mark.parametrize("path", [
     "/heartbeat", "/admin/sync-from-master", "/dashboard", "/noc", "/api/overview",
-    "auth/login", "/auth/../admin", None, 7,
+    "/tickets", "/account", "/auth/login",  # pre-Supabase surface is gone
+    "auth/v1/signup", "/auth/v1/../admin", None, 7,
 ])
 def test_operator_paths_and_malformed_refused(path):
     assert not path_allowed(path)
@@ -103,7 +106,7 @@ def test_refused_path_answers_status_0_without_touching_the_uplink(monkeypatch):
 def test_disallowed_method_refused():
     service, transport = make_service()
     reply = serve_and_reply(service, transport,
-                            encode_request("r1", "DELETE", "/account"))
+                            encode_request("r1", "PUT", "/rest/v1/events"))
     assert reply["status"] == 0
     assert "method not allowed" in reply["error"]
 
@@ -131,19 +134,27 @@ def test_request_forwarded_and_response_returned(monkeypatch):
         seen["method"] = request.get_method()
         seen["data"] = request.data
         seen["auth"] = request.get_header("Authorization")
+        seen["apikey"] = request.get_header("Apikey")
+        seen["prefer"] = request.get_header("Prefer")
         seen["content_type"] = request.get_header("Content-type")
         seen["timeout"] = timeout
         return FakeHTTPResponse(b'{"ticket_id":"tk"}', status=201)
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    frame = encode_request("r7", "POST", "/tickets", body='{"event_id":"e"}',
-                           headers={"authorization": "Bearer tok"})
+    frame = encode_request("r7", "POST", "/functions/v1/tickets",
+                           body='{"event_id":"e"}',
+                           headers={"authorization": "Bearer tok",
+                                    "apikey": "anon-key",
+                                    "prefer": "return=minimal",
+                                    "x-forwarded-for": "nope"})
     reply = serve_and_reply(service, transport, frame)
 
-    assert seen["url"] == "http://backend:8000/tickets"
+    assert seen["url"] == "http://backend:8000/functions/v1/tickets"
     assert seen["method"] == "POST"
     assert seen["data"] == b'{"event_id":"e"}'
     assert seen["auth"] == "Bearer tok"
+    assert seen["apikey"] == "anon-key"
+    assert seen["prefer"] == "return=minimal"
     assert seen["content_type"] == "application/json"
     assert reply == {"t": "res", "id": "r7", "status": 201,
                      "body": '{"ticket_id":"tk"}'}
@@ -158,8 +169,9 @@ def test_backend_http_error_keeps_its_status(monkeypatch):
             io.BytesIO(b'{"detail":"ticket expired"}'))
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    reply = serve_and_reply(service, transport,
-                            encode_request("r1", "POST", "/attestation/token"))
+    reply = serve_and_reply(
+        service, transport,
+        encode_request("r1", "POST", "/functions/v1/attestation-token"))
     assert reply["status"] == 403
     assert json.loads(reply["body"]) == {"detail": "ticket expired"}
 
@@ -172,7 +184,7 @@ def test_unreachable_backend_answers_status_0(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
     reply = serve_and_reply(service, transport,
-                            encode_request("r1", "GET", "/events"))
+                            encode_request("r1", "GET", "/rest/v1/events"))
     assert reply == {"t": "res", "id": "r1", "status": 0,
                      "error": "backend unreachable"}
 
@@ -193,7 +205,7 @@ def test_relay_demuxes_proxy_frames_off_the_pipeline():
     relay = NodeRelay(transport=transport, backhaul=RecordingBackhaul(),
                       zone_id=1, backend_proxy=proxy)
 
-    frame = encode_request("r1", "GET", "/events")
+    frame = encode_request("r1", "GET", "/rest/v1/events")
     transport.deliver("phoneA", frame)
 
     assert proxy.frames == [("phoneA", frame)]
@@ -205,7 +217,7 @@ def test_relay_drops_proxy_frames_when_no_service_wired():
     transport = FakeTransport(["phoneA", "phoneB"])
     NodeRelay(transport=transport, backhaul=RecordingBackhaul(), zone_id=1)
 
-    transport.deliver("phoneA", encode_request("r1", "GET", "/events"))
+    transport.deliver("phoneA", encode_request("r1", "GET", "/rest/v1/events"))
     assert transport.sent == []
 
 

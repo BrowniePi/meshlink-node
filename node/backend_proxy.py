@@ -42,20 +42,18 @@ log = logging.getLogger("meshlink.backend_proxy")
 
 BACKEND_PROXY_MAGIC = b"MLBP1"
 
-# App-facing API only: account/auth, ticket→token chain, event catalogue,
-# and the user directory. Everything else on the backend is operator surface.
+# App-facing Supabase surface only: GoTrue auth, PostgREST tables/RPCs, and
+# Edge Functions (ticket→token chain). RLS is the real gate server-side; the
+# allowlist just keeps the proxy from becoming a generic tunnel.
 ALLOWED_PATH_PREFIXES = (
-    "/auth/",
-    "/tickets",
-    "/attestation/",
-    "/events",
-    "/account",
-    "/directory/",
-    "/friendships",
+    "/auth/v1/",
+    "/rest/v1/",
+    "/functions/v1/",
     "/health",
 )
 
-ALLOWED_METHODS = ("GET", "POST")
+# PostgREST uses PATCH (profile key rebind) and DELETE alongside GET/POST.
+ALLOWED_METHODS = ("GET", "POST", "PATCH", "DELETE")
 
 # Response bodies ride BLE at worst (180-byte notify chunks) — cap them so a
 # runaway endpoint can't wedge a phone's link for minutes.
@@ -175,13 +173,19 @@ class BackendProxyService:
         headers = {}
         if data is not None:
             headers["Content-Type"] = "application/json"
-        # Authorization is the only phone header that may cross — the account
-        # flows (/auth/me, /account, /friendships) carry bearer tokens.
+        # Only the headers Supabase needs may cross: the bearer token
+        # (Authorization), the project anon/API key (apikey), and PostgREST's
+        # Prefer for upsert/return behaviour. Everything else is dropped.
         raw_headers = req.get("headers")
         if isinstance(raw_headers, dict):
-            auth = raw_headers.get("authorization") or raw_headers.get("Authorization")
-            if isinstance(auth, str):
-                headers["Authorization"] = auth
+            lowered = {k.lower(): v for k, v in raw_headers.items()
+                       if isinstance(k, str)}
+            for name, sent_as in (("authorization", "Authorization"),
+                                  ("apikey", "apikey"),
+                                  ("prefer", "Prefer")):
+                value = lowered.get(name)
+                if isinstance(value, str):
+                    headers[sent_as] = value
 
         request = urllib.request.Request(
             f"{self._base_url}{path}", data=data, headers=headers, method=method,

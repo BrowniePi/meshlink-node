@@ -96,8 +96,15 @@ BACKEND_BATMAN_URL = os.environ.get(
 )
 
 # The effective URL every node→backend caller uses (organiser key fetch,
-# heartbeat, directory sync, phone backend-proxy).
+# heartbeat, directory sync, phone backend-proxy). Post-Supabase this is
+# either the Supabase project URL (https://<ref>.supabase.co) or a venue-local
+# backend that speaks the same Supabase-shaped REST.
 BACKEND_URL = BACKEND_BATMAN_URL if BACKEND_CHANNEL == "batman" else BACKEND_BASE_URL
+
+# Supabase anon/publishable key. Sent as the `apikey` header on the node's
+# own backend calls (directory sync, organiser key, heartbeats). A venue-local
+# backend ignores it, Supabase requires it. Empty → header omitted.
+SUPABASE_ANON_KEY = os.environ.get("MESHLINK_SUPABASE_ANON_KEY", "")
 
 # Event this node is deployed for; attestation tokens for any other eid are
 # rejected at pipeline step 7. Must match the event_id the app purchases

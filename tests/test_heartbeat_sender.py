@@ -12,7 +12,7 @@ from tests.test_relay import RecordingBackhaul
 
 
 class RecordingBackend:
-    """Minimal local stand-in for POST /heartbeat."""
+    """Minimal local stand-in for POST /rest/v1/heartbeats."""
 
     def __init__(self):
         self.received: list[dict] = []
@@ -20,8 +20,12 @@ class RecordingBackend:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                assert self.path == "/rest/v1/heartbeats"
+                assert self.headers.get("apikey") == "anon-test-key"
                 body = self.rfile.read(int(self.headers["Content-Length"]))
-                outer.received.append(json.loads(body))
+                row = json.loads(body)
+                assert row["node_id"] == "test-node"
+                outer.received.append(row["payload"])
                 self.send_response(201)
                 self.end_headers()
 
@@ -67,6 +71,7 @@ def make_sender(url, interval_s=0.05, phones=("phoneA", "wifi:10.78.0.9:1234")):
         relay=FakeRelay(),
         interval_s=interval_s,
         timeout_s=1.0,
+        anon_key="anon-test-key",
     )
 
 

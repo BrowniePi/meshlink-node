@@ -43,11 +43,14 @@ class HeartbeatSender:
         phone_ping: PhonePingService | None = None,
         interval_s: float = 60.0,
         timeout_s: float = 3.0,
+        anon_key: str = "",
     ):
         self._node_id = node_id
         self._zone_id = zone_id
         self._zone_name = zone_name
-        self._url = f"{base_url.rstrip('/')}/heartbeat"
+        # PostgREST insert into the heartbeats table: {node_id, payload}.
+        self._url = f"{base_url.rstrip('/')}/rest/v1/heartbeats"
+        self._anon_key = anon_key
         self._transport = transport
         self._backhaul = backhaul
         self._relay = relay
@@ -106,10 +109,15 @@ class HeartbeatSender:
     def beat(self) -> None:
         """Send one heartbeat; failures are logged, never raised."""
         body = self.build_payload()
+        headers = {"Content-Type": "application/json",
+                   "Prefer": "return=minimal"}
+        if self._anon_key:
+            headers["apikey"] = self._anon_key
+            headers["Authorization"] = f"Bearer {self._anon_key}"
         req = urllib.request.Request(
             self._url,
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
+            data=json.dumps({"node_id": self._node_id, "payload": body}).encode(),
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout_s):

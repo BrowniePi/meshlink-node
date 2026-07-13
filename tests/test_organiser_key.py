@@ -14,7 +14,8 @@ PUB_HEX = "ab" * 32
 def backend():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            assert self.path == "/attestation/public-key"
+            assert self.path == "/functions/v1/attestation-public-key"
+            assert self.headers.get("apikey") == "anon-test-key"
             body = json.dumps({"public_key": PUB_HEX, "key_algorithm": "Ed25519",
                                "jwt_algorithm": "EdDSA"}).encode()
             self.send_response(200)
@@ -34,7 +35,8 @@ def backend():
 
 def test_fetches_and_caches_to_disk(backend, tmp_path):
     cache = tmp_path / "organiser_pubkey.hex"
-    assert load_organiser_pubkey(backend, cache) == PUB_HEX
+    assert load_organiser_pubkey(backend, cache,
+                                 anon_key="anon-test-key") == PUB_HEX
     assert cache.read_text().strip() == PUB_HEX
 
 

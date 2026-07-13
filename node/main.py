@@ -66,7 +66,8 @@ def main() -> None:
                  organiser_pubkey)
     else:
         organiser_pubkey = load_organiser_pubkey(
-            config.BACKEND_URL, config.ORGANISER_KEY_CACHE
+            config.BACKEND_URL, config.ORGANISER_KEY_CACHE,
+            anon_key=config.SUPABASE_ANON_KEY,
         )
     attestation = AttestationCache(bytes.fromhex(organiser_pubkey), config.EVENT_ID)
     log.info("attestation enforcement on — event_id=%s", config.EVENT_ID)
@@ -136,6 +137,7 @@ def main() -> None:
         cache_path=config.DIRECTORY_CACHE,
         event_id=config.EVENT_ID,
         refresh_interval_s=config.HEARTBEAT_INTERVAL_S,
+        anon_key=config.SUPABASE_ANON_KEY,
     )
     location_store = LocationStore()
     location = LocationService(
@@ -175,6 +177,7 @@ def main() -> None:
         relay=relay,
         phone_ping=phone_ping,
         interval_s=config.HEARTBEAT_INTERVAL_S,
+        anon_key=config.SUPABASE_ANON_KEY,
     )
 
     backhaul.start()

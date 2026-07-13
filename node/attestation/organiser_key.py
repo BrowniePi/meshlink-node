@@ -15,16 +15,19 @@ log = logging.getLogger("meshlink.attestation")
 
 
 def load_organiser_pubkey(base_url: str, cache_path: Path,
-                          timeout_s: float = 5.0) -> str:
+                          timeout_s: float = 5.0,
+                          anon_key: str = "") -> str:
     """Fetch the organiser public key, falling back to the disk cache.
 
     Raises RuntimeError when neither source is available — a node that cannot
     learn the organiser key cannot validate any token, and running step 7
     open would silently re-open the Sybil hole Phase 5 exists to close.
     """
-    url = f"{base_url.rstrip('/')}/attestation/public-key"
+    url = f"{base_url.rstrip('/')}/functions/v1/attestation-public-key"
+    headers = {"apikey": anon_key} if anon_key else {}
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             pub_hex = json.load(resp)["public_key"]
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(pub_hex + "\n")

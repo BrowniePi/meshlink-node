@@ -25,9 +25,15 @@ log = logging.getLogger("meshlink.directory")
 
 class DirectoryCache:
     def __init__(self, base_url: str, cache_path: Path, event_id: str,
-                 refresh_interval_s: float = 60.0, timeout_s: float = 5.0):
-        self._url = (f"{base_url.rstrip('/')}/directory/sync"
-                     f"?event_id={event_id}")
+                 refresh_interval_s: float = 60.0, timeout_s: float = 5.0,
+                 anon_key: str = ""):
+        # PostgREST view: returns a plain JSON array of directory rows.
+        # (event_id was accepted-but-unused by the old backend; PostgREST
+        # rejects unknown filter params, so it stays out of the URL.)
+        self._url = (f"{base_url.rstrip('/')}/rest/v1/directory"
+                     f"?select=username,curve25519_pub,ed25519_pub,created_at"
+                     f"&order=username")
+        self._anon_key = anon_key
         self._cache_path = cache_path
         self._interval_s = refresh_interval_s
         self._timeout_s = timeout_s
@@ -55,9 +61,13 @@ class DirectoryCache:
         """One sync attempt. Keeps the previous copy on any failure — the
         node must keep answering with its offline copy when the backhaul has
         no internet."""
+        headers = {"apikey": self._anon_key} if self._anon_key else {}
         try:
-            with urllib.request.urlopen(self._url, timeout=self._timeout_s) as resp:
-                users = json.load(resp)["users"]
+            req = urllib.request.Request(self._url, headers=headers)
+            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+                users = json.load(resp)
+            if not isinstance(users, list):
+                raise ValueError("directory response is not a list")
         except (OSError, ValueError, KeyError) as exc:
             log.warning("directory sync failed (%s) — keeping %d cached users",
                         exc, len(self._by_username))

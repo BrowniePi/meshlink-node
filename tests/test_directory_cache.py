@@ -15,8 +15,9 @@ USERS = [
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        assert self.path.startswith("/directory/sync")
-        body = json.dumps({"users": USERS, "count": len(USERS)}).encode()
+        assert self.path.startswith("/rest/v1/directory")
+        assert self.headers.get("apikey") == "anon-test-key"
+        body = json.dumps(USERS).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -37,7 +38,8 @@ def serve_once():
 def test_sync_and_lookups(tmp_path):
     server, url = serve_once()
     try:
-        cache = DirectoryCache(url, tmp_path / "dir.json", "test-event-001")
+        cache = DirectoryCache(url, tmp_path / "dir.json", "test-event-001",
+                               anon_key="anon-test-key")
         assert cache.refresh() is True
     finally:
         server.shutdown()

@@ -254,6 +254,7 @@ def test_heartbeat_carries_phone_telemetry_reports():
             backhaul=RecordingBackhaul(),
             timeout_s=1.0,
             phone_ping=service,
+            anon_key="anon-test-key",
         )
         sender._started_at = time.monotonic()
         sender.beat()
