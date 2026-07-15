@@ -55,6 +55,24 @@ ALLOWED_PATH_PREFIXES = (
     "/health",
 )
 
+# Supabase-shaped routes needed by the app's offline friendship flows. Keep
+# these exact: allowing all of /rest/v1/ would expose arbitrary PostgREST
+# tables through a venue node.
+ALLOWED_REST_PATHS = frozenset({
+    "/rest/v1/directory",
+    "/rest/v1/friendships",
+    "/rest/v1/relay_messages",
+    "/rest/v1/rpc/send_friend_request",
+    "/rest/v1/rpc/get_friend_requests",
+    "/rest/v1/rpc/accept_friend_request",
+    "/rest/v1/rpc/decline_friend_request",
+    "/rest/v1/rpc/send_message",
+    "/rest/v1/rpc/ack_messages",
+    "/rest/v1/rpc/put_location_blobs",
+    "/rest/v1/rpc/get_location",
+    "/rest/v1/rpc/mirror_friendship",
+})
+
 ALLOWED_METHODS = ("GET", "POST")
 
 # Response bodies ride BLE at worst (180-byte notify chunks) — cap them so a
@@ -113,7 +131,10 @@ def path_allowed(path) -> bool:
         isinstance(path, str)
         and path.startswith("/")
         and ".." not in path
-        and path.startswith(ALLOWED_PATH_PREFIXES)
+        and (
+            path.startswith(ALLOWED_PATH_PREFIXES)
+            or path.split("?", 1)[0] in ALLOWED_REST_PATHS
+        )
     )
 
 
@@ -175,13 +196,20 @@ class BackendProxyService:
         headers = {}
         if data is not None:
             headers["Content-Type"] = "application/json"
-        # Authorization is the only phone header that may cross — the account
-        # flows (/auth/me, /account, /friendships) carry bearer tokens.
+        # Only the fixed Supabase authentication/response-shape headers may
+        # cross. The venue backend may proxy upstream while its own uplink is
+        # healthy, so it needs the apikey as well as the account bearer.
         raw_headers = req.get("headers")
         if isinstance(raw_headers, dict):
-            auth = raw_headers.get("authorization") or raw_headers.get("Authorization")
-            if isinstance(auth, str):
-                headers["Authorization"] = auth
+            allowed = {
+                "authorization": "Authorization",
+                "apikey": "apikey",
+                "prefer": "Prefer",
+            }
+            for key, value in raw_headers.items():
+                canonical = allowed.get(str(key).lower())
+                if canonical is not None and isinstance(value, str):
+                    headers[canonical] = value
 
         request = urllib.request.Request(
             f"{self._base_url}{path}", data=data, headers=headers, method=method,

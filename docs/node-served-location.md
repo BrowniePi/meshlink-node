@@ -5,6 +5,15 @@ the target phone is asleep) — but only against a capability token signed by
 the target's own Ed25519 key. **The node enforces consent; it never authors
 it.**
 
+Since the sprayed-query revamp the node is the *fallback* answerer, not the
+only one: a LOCATION_QUERY sprays across the mesh like any message, the
+target phone answers with a live fix (`beacon_age_s ≈ 0`), and the node's
+cached answer covers a target that is asleep or unreachable. The node
+therefore answers **and** keeps relaying the query toward the target
+(`handle_node_terminated` returns False for queries); responses carry an
+8-byte `target_pubkey_id` so the requester can correlate racing answers and
+keep the freshest. Beacons remain strictly node-terminated.
+
 ## What was added
 
 | Module | Purpose |
@@ -13,7 +22,7 @@ it.**
 | `node/location/authz.py` | Capability check (core `capability.verify`), revocation set, per-(requester, target) 60 s query rate limit, uniform silent refusals. |
 | `node/location/service.py` | Node-terminated routing for LOCATION (0x02) beacons, LOCATION_QUERY, LOCATION_REVOKE; signs LOCATION_RESPONSE with the node's own identity (`node_identity.json`, generated on first boot). |
 | `node/directory/cache.py` | Offline-capable read-only copy of `{username, curve25519_pub, ed25519_pub}` from the backend's `/directory/sync`, refreshed at the heartbeat cadence. Public identity only — never locations. |
-| `node/relay.py` hook | After the full 8-step pipeline accepts a packet, node-terminated location types are consumed instead of fanned out. Steps 1–7 are untouched: a query is still a signed, attested, rate-limited message. |
+| `node/relay.py` hook | After the full 8-step pipeline accepts a packet, node-terminated location types (beacons) are consumed instead of fanned out; queries are answered *and* relayed onward. Fan-out uses the pipeline's step-8 forward copy (ttl−1, spray_L binary-split), falling back to plain ttl−1 for wait-phase packets. Steps 1–7 are untouched: a query is still a signed, attested, rate-limited message. |
 
 ## Security invariants, node side
 

@@ -178,16 +178,17 @@ def test_full_friendship_location_loop(backend_url, rig):
     assert store.get(ALICE.public_key) is not None
     assert transport.sent == [], "a beacon must never be fanned out"
 
-    # 5. Bob queries through the node and gets a response sealed to HIM.
+    # 5. Bob queries through the node and gets a response sealed to HIM;
+    #    the query also keeps spraying toward alice's phone (hybrid).
     transport.deliver(
         "phone-bob",
         _packet(BOB, MessageType.LOCATION_QUERY,
                 encode_location_query(token), b"\x0b" * 16))
-    assert len(transport.sent) == 1
-    peer, raw = transport.sent[0]
+    responses = [(p, parse_packet(raw)) for p, raw in transport.sent
+                 if parse_packet(raw).msg_type == MessageType.LOCATION_RESPONSE]
+    assert len(responses) == 1
+    peer, msg = responses[0]
     assert peer == "phone-bob"
-    msg = parse_packet(raw)
-    assert msg.msg_type == MessageType.LOCATION_RESPONSE
     payload = decode_location_response(msg.payload, BOB_CURVE_PRIV)
     assert (payload.lat_microdeg, payload.lon_microdeg) == (51503298, -127144)
     with pytest.raises(Exception):
@@ -208,7 +209,10 @@ def test_full_friendship_location_loop(backend_url, rig):
         "phone-bob",
         _packet(BOB, MessageType.LOCATION_QUERY,
                 encode_location_query(token), b"\x0b" * 16))
-    assert transport.sent == [], "revoked token must be refused silently"
+    assert not any(
+        parse_packet(raw).msg_type == MessageType.LOCATION_RESPONSE
+        for _, raw in transport.sent
+    ), "revoked token must be refused silently"
 
     # 7. The friendship mirror is queryable — and carries no coordinates
     #    (the backend has nowhere to put one; asserted structurally in its

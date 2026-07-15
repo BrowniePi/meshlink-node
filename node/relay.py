@@ -19,8 +19,9 @@ log = logging.getLogger("meshlink.relay")
 
 BROADCAST_ZONE = 0xFFFF
 
-# ttl byte offset in the fixed header (docs/message-format.md §2).
+# ttl / spray_L byte offsets in the fixed header (docs/message-format.md §2).
 _TTL_OFFSET = 68
+_SPRAY_OFFSET = 69
 
 
 def _describe_payload(payload: bytes) -> str:
@@ -190,18 +191,27 @@ class NodeRelay:
             self._backhaul.forward_to_zone(msg.zone_id, raw)
             self._count("forwarded_cross_zone")
 
-        # Phase 2: single node, single zone — every accepted message is also
-        # relayed to the local BLE cell regardless of its zone_id.
-        relayed = decrement_ttl(raw)
-        for peer in self._transport.list_peers():
-            if peer == peer_id:
-                continue
-            self._transport.send(peer, relayed)
-        self._count("relayed_to_phones")
-        log.info(
-            "relayed msg %s from %s (zone %d, ttl %d→%d)",
-            msg.msg_id.hex()[:8], peer_id, msg.zone_id, msg.ttl, msg.ttl - 1,
-        )
+        # Every accepted message is also relayed to the local BLE cell
+        # regardless of its zone_id. The pipeline's step-8 forward copy
+        # carries ttl-1 and the binary-split spray_L share, so downstream
+        # phones inherit a halved copy budget. A wait-phase message
+        # (forward=None) is still delivered locally with plain ttl-1 — the
+        # local cell is the node's delivery attempt, and the destination
+        # phone may be in it; receiving phones generate no further spray
+        # copies for it.
+        relayed = result.forward if result.forward is not None else decrement_ttl(raw)
+        if relayed[_TTL_OFFSET] > 0:
+            for peer in self._transport.list_peers():
+                if peer == peer_id:
+                    continue
+                self._transport.send(peer, relayed)
+            self._count("relayed_to_phones")
+            log.info(
+                "relayed msg %s from %s (zone %d, ttl %d→%d, spray_L %d→%d)",
+                msg.msg_id.hex()[:8], peer_id, msg.zone_id,
+                msg.ttl, relayed[_TTL_OFFSET], msg.spray_l,
+                relayed[_SPRAY_OFFSET],
+            )
 
     def _handle_presentation(self, peer_id: str, raw: bytes) -> None:
         """Validate a token presentation and cache its sender — never

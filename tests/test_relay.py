@@ -34,13 +34,17 @@ def test_decrement_ttl_touches_only_ttl_byte():
 
 def test_accepted_message_relayed_to_other_peers_with_ttl_decremented():
     _, transport, _ = make_relay(["phoneA", "phoneB", "phoneC"])
-    packet = build_packet(ttl=5, zone_id=ZONE)
+    packet = build_packet(ttl=5, spray_l=8, zone_id=ZONE)
 
     transport.deliver("phoneA", packet)
 
     assert [p for p, _ in transport.sent] == ["phoneB", "phoneC"]
     for _, data in transport.sent:
-        assert data == decrement_ttl(packet)
+        # step-8 forward copy: ttl decremented AND spray_L binary-split
+        assert data[68] == 4
+        assert data[69] == 4
+        assert data[:68] == packet[:68]
+        assert data[70:] == packet[70:]
 
 
 def test_dropped_message_not_relayed():

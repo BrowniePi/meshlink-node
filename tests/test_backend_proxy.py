@@ -73,7 +73,13 @@ def test_decode_rejects_non_json_and_missing_t():
 @pytest.mark.parametrize("path", [
     "/auth/login", "/tickets", "/tickets/tk-1/validity?event_id=e",
     "/attestation/token", "/events", "/account", "/directory/sync",
-    "/friendships", "/health",
+    "/friendships", "/health", "/rest/v1/directory?username=eq.alice",
+    "/rest/v1/friendships", "/rest/v1/relay_messages?order=created_at.asc",
+    "/rest/v1/rpc/send_friend_request", "/rest/v1/rpc/get_friend_requests",
+    "/rest/v1/rpc/accept_friend_request", "/rest/v1/rpc/decline_friend_request",
+    "/rest/v1/rpc/send_message", "/rest/v1/rpc/ack_messages",
+    "/rest/v1/rpc/put_location_blobs", "/rest/v1/rpc/get_location",
+    "/rest/v1/rpc/mirror_friendship",
 ])
 def test_app_facing_paths_allowed(path):
     assert path_allowed(path)
@@ -81,6 +87,7 @@ def test_app_facing_paths_allowed(path):
 
 @pytest.mark.parametrize("path", [
     "/heartbeat", "/admin/sync-from-master", "/dashboard", "/noc", "/api/overview",
+    "/rest/v1/profiles", "/rest/v1/rpc/operator_only",
     "auth/login", "/auth/../admin", None, 7,
 ])
 def test_operator_paths_and_malformed_refused(path):
@@ -131,19 +138,25 @@ def test_request_forwarded_and_response_returned(monkeypatch):
         seen["method"] = request.get_method()
         seen["data"] = request.data
         seen["auth"] = request.get_header("Authorization")
+        seen["apikey"] = request.get_header("Apikey")
+        seen["prefer"] = request.get_header("Prefer")
         seen["content_type"] = request.get_header("Content-type")
         seen["timeout"] = timeout
         return FakeHTTPResponse(b'{"ticket_id":"tk"}', status=201)
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
     frame = encode_request("r7", "POST", "/tickets", body='{"event_id":"e"}',
-                           headers={"authorization": "Bearer tok"})
+                           headers={"authorization": "Bearer tok",
+                                    "apikey": "anon", "prefer": "return=minimal",
+                                    "cookie": "must-not-cross"})
     reply = serve_and_reply(service, transport, frame)
 
     assert seen["url"] == "http://backend:8000/tickets"
     assert seen["method"] == "POST"
     assert seen["data"] == b'{"event_id":"e"}'
     assert seen["auth"] == "Bearer tok"
+    assert seen["apikey"] == "anon"
+    assert seen["prefer"] == "return=minimal"
     assert seen["content_type"] == "application/json"
     assert reply == {"t": "res", "id": "r7", "status": 201,
                      "body": '{"ticket_id":"tk"}'}

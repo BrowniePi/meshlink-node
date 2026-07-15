@@ -11,7 +11,11 @@ message types the node itself terminates:
   LOCATION_QUERY     — capability check (location/authz.py); on success the
                        node signs a LOCATION_RESPONSE with its own identity
                        and sends it straight back over the requester's
-                       session. Never forwarded to the target phone.
+                       session. Either way the query reports "not handled"
+                       so the relay still sprays it toward the target phone,
+                       which answers with a live fix — the node's cached
+                       answer is the fallback for a target that is asleep or
+                       out of reach; the requester keeps the freshest.
   LOCATION_REVOKE    — feeds the revocation set, then reports "not handled"
                        so the relay still fans it out (target → node AND
                        target → friend).
@@ -35,6 +39,11 @@ from node.location.store import LocationStore
 log = logging.getLogger("meshlink.location")
 
 RESPONSE_TTL = 3
+
+# The requester may be phone-hops away now that queries spray beyond the
+# node's own cell — give the response a real Spray-and-Wait copy budget
+# (routing Case 2) instead of the old single direct-session copy.
+RESPONSE_SPRAY_L = 8
 
 
 class LocationService:
@@ -73,15 +82,18 @@ class LocationService:
                     self._identity,
                     ephem_id=self._ephem_id,
                     ttl=RESPONSE_TTL,
-                    spray_l=1,
+                    spray_l=RESPONSE_SPRAY_L,
                     zone_id=self._zone_id,
                     msg_type=MessageType.LOCATION_RESPONSE,
                     payload=response_payload,
                 )
                 self._transport.send(peer_id, packet)
             # Refusal is silent and uniform — nothing is sent either way
-            # beyond the success path (§8.3).
-            return True
+            # beyond the success path (§8.3). Answered or not, the query
+            # keeps spraying toward the target phone (hybrid: the phone's
+            # live fix outranks this cached one; the token is only usable
+            # by its grantee, so onward relay leaks metadata, not location).
+            return False
 
         if msg.msg_type == MessageType.LOCATION_REVOKE:
             self._authz.handle_revoke(msg)

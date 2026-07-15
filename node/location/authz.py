@@ -111,6 +111,7 @@ class LocationAuthz:
             return self._refuse(msg, "requester not in directory")
 
         payload = LocationResponsePayload(
+            target_pubkey_id=token.issuer_pubkey_id,
             lat_microdeg=row.lat_microdeg,
             lon_microdeg=row.lon_microdeg,
             accuracy_m=row.accuracy_m,
