@@ -8,8 +8,10 @@ from node.core import pubkey_id
 from node.directory.cache import DirectoryCache
 
 USERS = [
-    {"username": "ada", "curve25519_pub": "aa" * 32, "ed25519_pub": "ab" * 32},
-    {"username": "grace", "curve25519_pub": "ba" * 32, "ed25519_pub": "bb" * 32},
+    {"user_id": "u-ada", "username": "ada",
+     "curve25519_pub": "aa" * 32, "ed25519_pub": "ab" * 32},
+    {"user_id": "u-grace", "username": "grace",
+     "curve25519_pub": "ba" * 32, "ed25519_pub": "bb" * 32},
 ]
 
 
@@ -49,6 +51,10 @@ def test_sync_and_lookups(tmp_path):
     entry = cache.by_ed25519_id(pubkey_id(bytes.fromhex("bb" * 32)))
     assert entry["username"] == "grace"
     assert cache.by_ed25519_id(b"\x00" * 8) is None
+    # account_for maps a full 32-byte envelope sender_key -> account UUID
+    assert cache.account_for(bytes.fromhex("bb" * 32))["user_id"] == "u-grace"
+    assert cache.account_for(b"\x11" * 32) is None   # unknown key
+    assert cache.account_for(b"\x11" * 8) is None     # malformed (not 32 bytes)
 
 
 def test_offline_boot_uses_disk_copy(tmp_path):

@@ -54,6 +54,7 @@ class LocationService:
         transport: Transport,
         node_identity,           # core identity.DeviceIdentity
         zone_id: int,
+        directory=None,          # DirectoryCache — sender_key -> account UUID
         clock: Callable[[], float] = time.time,
     ):
         self._store = store
@@ -61,6 +62,7 @@ class LocationService:
         self._transport = transport
         self._identity = node_identity
         self._zone_id = zone_id
+        self._directory = directory
         self._clock = clock
         # The node is infrastructure, not a phone: a per-boot random ephem_id
         # satisfies the envelope format without pretending to be a rotating
@@ -118,3 +120,14 @@ class LocationService:
             accuracy_m=accuracy_m,
             zone_id=msg.zone_id,
         )
+        log.info("LOCATION beacon from %s stored", self._who(msg.sender_key))
+
+    def _who(self, sender_key: bytes) -> str:
+        """Human-readable identity for logs: the backend account behind the
+        key when the directory knows it, else the truncated key hex. Never
+        raises — logging must not depend on a synced directory."""
+        account = self._directory.account_for(sender_key) if self._directory else None
+        if account:
+            return (f"user_id={account.get('user_id')} "
+                    f"username={account.get('username')}")
+        return f"sender_key={sender_key.hex()[:16]}"

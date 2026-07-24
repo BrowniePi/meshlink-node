@@ -148,6 +148,7 @@ def main() -> None:
         transport=transport,
         node_identity=load_or_create_identity(config.NODE_IDENTITY_PATH),
         zone_id=config.NODE_ZONE_ID,
+        directory=directory,
     )
     # Backend-via-node: answers the app's MLBP1 proxy frames over the same
     # uplink the heartbeat uses.
