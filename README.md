@@ -92,7 +92,7 @@ No new required config — the same two variables as attestation cover it:
 
 ```bash
 MESHLINK_EVENT_ID=meshlink-demo \
-MESHLINK_BACKEND_URL=http://192.168.1.14:8000 \
+MESHLINK_BACKEND_URL=http://192.168.1.6:8000 \
 python3 -m node.main
 ```
 

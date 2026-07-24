@@ -1,8 +1,11 @@
 """Node-cached user directory, synced from meshlink-backend.
 
-Read-only copy of `{username, curve25519_pub, ed25519_pub}` for the event's
-attendees, used to resolve the target key for capability-token verification
-(location/authz.py) and usernames in friend requests. Same offline-first
+Read-only copy of `{user_id, username, curve25519_pub, ed25519_pub}` for the
+event's attendees, used to resolve the target key for capability-token
+verification (location/authz.py), usernames in friend requests, and the
+backend account UUID behind a signed envelope's `sender_key` (account_for).
+`user_id` is optional — rows synced from an older backend simply lack it and
+account_for returns None for that field. Same offline-first
 pattern as the organiser key (node/attestation/organiser_key.py): refreshed
 from GET /directory/sync at the heartbeat cadence and on demand, persisted to
 disk, and fully functional with no internet during the event.
@@ -93,6 +96,15 @@ class DirectoryCache:
         issuer/grantee field) to a directory entry."""
         with self._lock:
             return self._by_ed_id.get(ed_pubkey_id)
+
+    def account_for(self, sender_key: bytes) -> Optional[dict]:
+        """Resolve a signed envelope's 32-byte Ed25519 `sender_key` to its
+        directory entry (which carries the backend `user_id`). A local dict
+        lookup — no network — so it works offline, same as by_ed25519_id.
+        Returns None for an unknown key or a malformed (non-32-byte) one."""
+        if len(sender_key) != 32:
+            return None
+        return self.by_ed25519_id(pubkey_id(sender_key))
 
     def user_count(self) -> int:
         with self._lock:
